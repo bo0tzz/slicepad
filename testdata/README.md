@@ -11,9 +11,16 @@ slicing core.
 
 ## Provenance — read before trusting a diff
 
-`reference.gcode` was produced by **OrcaSlicer 2.4.2**, which is what
-`scripts/fetch-orca.sh` pins. A diff against it only means something while
-those match: move the pin and the reference has to be regenerated.
+`reference.gcode` was produced by **OrcaSlicer 2.4.2** on **x86-64 Linux**, and
+`scripts/fetch-orca.sh` pins that version. A diff against it only means something
+while those match: move the pin and the reference has to be regenerated.
+
+The architecture matters as much as the version. Slicing is sensitive to
+floating-point code generation — building the same source for x86-64-v3, where
+fused multiply-add is available, changes the G-code — so a reference produced on
+one architecture is not automatically the standard for another. An arm64 build
+disagreeing with this file is not necessarily wrong; see
+`docs/nondeterminism.md` and the `-ffp-contract` note in the CI workflow.
 
 The presets actually selected, per the G-code's own config block:
 
