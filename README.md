@@ -1,93 +1,116 @@
 # SlicePad
 
-An iPad slicer that runs OrcaSlicer's engine on-device, driven by profiles you
+An iPad slicer that runs OrcaSlicer's engine on-device, driven by a profile you
 build in desktop Orca.
 
 The workflow it targets: model in Shapr3D on the iPad, export a mesh, slice it
-with your real Orca profile, send the G-code to a Klipper printer over
-Moonraker. Desktop Orca is involved exactly once — to author and export the
-profile bundle.
+with your real Orca profile, send the G-code to a Klipper printer over Moonraker.
+Desktop Orca is involved once, to author the profile.
+
+## Status
+
+The engine works and is verified against real inputs. The app does not exist yet.
+
+- **Done**: headless libslic3r, the C ABI, auto-orient, arrange, overrides,
+  cancellation, slice statistics, and the geometry a plate view needs. Ten gates
+  compare all of it against G-code sliced by desktop Orca from the same profile
+  and mesh — including a byte-identical match, 3328 of 3328 commands, starting
+  from a raw Shapr3D export.
+- **Not started**: the iOS build (blocked on getting the dependency set to build
+  for Apple targets), the SwiftUI app, Moonraker upload, and G-code thumbnails.
+
+## How a profile gets here
+
+Save a project in desktop Orca (**File → Save Project As**) and hand the `.3mf`
+to `sp_load_config`. Its `Metadata/project_settings.config` holds the printer,
+process and filament settings **already merged** — 655 keys for a real SV08
+profile.
+
+That is why there is no notion of presets in the ABI. An exported preset bundle
+contains thin deltas plus the *name* of a system parent, and resolving those names
+means `PresetBundle`, whose machinery is built around GUI and cloud-sync state
+that does not exist here. A saved project sidesteps all of it: no `inherits`
+chains, no vendor profile tree to ship.
+
+The geometry in the profile project is ignored, so one "carrier" project can be
+exported per profile and reused for every model. It works equally well saved from
+an empty plate.
+
+A carrier is a snapshot of a *combination*, not composable presets — a different
+filament means a different carrier.
 
 ## Non-goals
 
-Orca's UI does not come along, and this is not trying to replace it. You get
-plate placement, preset selection, and a small set of overrides (layer height,
-infill, supports, temperatures). Anything deeper is a desktop job.
+Orca's UI does not come along. You get placement, three overrides (wall loops,
+infill density, supports on/off) and a slice. Anything deeper is a desktop job.
 
-Also deliberately absent: multi-material and painting (the engine paths there
-are the least stable when ported off desktop), STEP import (no OCCT — Shapr3D's
-free tier exports mesh only), and any non-Klipper printer integration.
+Deliberately absent: multi-material and painting, STEP import (no OCCT), and any
+non-Klipper printer integration.
 
 ## Architecture
 
 ```
-SlicePad.app                       SwiftUI, iPad only
+SwiftUI app                    does not exist yet
     │
-    │  slicepad.h                  C ABI, ~15 functions, JSON for structured data
+    │  core/include/slicepad.h  C ABI, ~25 functions, JSON for structured data
     ▼
-SlicePadCore.xcframework           arm64-ios + arm64-simulator
-    └── libslic3r.a + deps         OrcaSlicer v2.4.2, GUI excluded
+slicepad_core + libslic3r       OrcaSlicer v2.4.2, GUI excluded
 ```
 
-`libslic3r` is built headless: no wxWidgets, no OpenGL, and with OCCT, OpenVDB,
-and OpenCV excluded. Those three are the bulk of the porting pain and none are
+`libslic3r` is built headless: no wxWidgets, no OpenGL, and with OCCT, OpenVDB and
+OpenCV excluded. Those three are the bulk of the porting pain and none are
 reachable from the feature set above.
+
+Everything crossing the ABI is a C string, a primitive or a packed float buffer,
+so Swift can call it without a C++ interop shim. Mesh triangles, bed outline and
+toolpath segments come out ready for a vertex buffer.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | `core/` | The C ABI and its implementation over libslic3r |
-| `cli/` | Linux harness running the same core — the fast development loop |
-| `deps/` | Cross-compile scripts for the iOS dependency set |
-| `ios/` | Xcode project and SwiftUI app |
+| `cli/` | Linux harness driving the same core — the fast development loop |
+| `tests/` | The correctness gates, plain C++ so they run wherever the engine builds |
+| `testdata/` | A real profile, a real mesh, and G-code from desktop Orca |
 | `patches/` | Changes to the engine itself, as a numbered patch stack |
+| `scripts/` | Fetching the engine, and running heavy builds without hurting the machine |
+| `docs/` | Findings worth keeping, e.g. how Orca drives Moonraker |
 | `third_party/orcaslicer/` | Pinned upstream source — fetched, patched, gitignored |
 
 `mise run fetch` populates `third_party/orcaslicer` at the pinned commit and
-applies the patch stack. Dev tooling is pinned in `mise.toml`; the rest of the
-dependency set is built from source into `deps/prefix`, deliberately including
-the ones Arch would happily provide — the iOS build has to build them anyway,
-and a Linux build that leans on system packages stops predicting whether the
-iOS build works.
-
-The app ships OrcaSlicer's `resources/profiles` as-is, so any printer you later
-point it at resolves its `inherits` chain without a rebuild.
+applies the patch stack; `mise run deps` builds the dependency set into
+`build/deps-prefix`. Dev tooling is pinned in `mise.toml`.
 
 ## Development loop
 
-There is no Mac in the inner loop. Two consequences shape the whole project:
+There is no Mac in the inner loop, which shapes everything:
 
-1. **Engine work happens on Linux.** `cli/` builds the same `core/` against
-   host libslic3r, so profile resolution, overrides, and slicing correctness are
-   developed and tested at full speed locally. The correctness oracle is desktop
-   Orca's own CLI: same profile, same mesh, same engine version, diffed G-code.
-2. **iOS work happens in CI.** GitHub Actions `macos-26` runners cross-compile
-   the dependency set, build the xcframework, and run the core's tests on the
-   iOS Simulator. The app is exported as an **unsigned** `.ipa` artifact;
-   SideStore signs it on-device at install time, so no Apple Developer account
-   and no signing secrets in CI.
+1. **Engine work happens on Linux.** `cli/` builds the same `core/`, so profile
+   handling and slicing correctness are developed at full speed locally. The
+   oracle is `testdata/reference.gcode`, sliced by desktop Orca 2.4.2 — the same
+   version the engine is pinned to.
+2. **Apple work happens in CI.** A `macos-26` runner exercises Apple's clang, ld64
+   and SDK, and runs the same gates. iOS then adds only cross-compilation on top
+   of a target already known good.
 
-Because the device is out of the loop until install time, anything that can be
-asserted headlessly must be — the simulator tests are the only thing standing
-between a bad commit and a ten-minute round trip.
+`tests/gate.cpp` is the safety net: ten gates covering config resolution, G-code
+equality, statistics, toolpath and plate geometry, the override controls,
+cancellation, transforms and the failure paths. Plain C++ over the C ABI with no
+platform dependencies, so the same source runs on an Apple target later. Both
+`ctest` and the binary directly take a fixtures directory and a working directory.
 
-`tests/gate.cpp` is that assertion: it compares the resolved configuration, every
-G-code command and the reported statistics against a reference sliced by desktop
-Orca, and it is plain C++ over the C ABI so the same source runs wherever the
-engine builds.
+Each gate compares against something independent rather than asserting a value
+computed by the code under test. That has repeatedly caught the oracle being wrong
+rather than the engine — worth knowing before trusting a failure.
 
-Building the whole thing with clang as well as gcc found two real portability
-defects (see `patches/0006` and the `nanosvg`/`tbbmalloc` notes in
-`CMakeLists.txt`) and produced **byte-identical G-code**, so the output does not
-depend on the compiler. Worth knowing if a build ever disagrees: suspect the
-build, not the engine. Reproduce it by pointing `CMAKE_PREFIX_PATH` at a
-clang-built dependency prefix — a clang consumer of gcc-built dependencies fails
-to link, which is a toolchain-mixing artefact rather than a defect.
+Building with clang as well as gcc found two real portability defects (patch 0006
+and the `nanosvg`/`tbbmalloc` notes in `CMakeLists.txt`) and produced
+**byte-identical G-code**, so output does not depend on the compiler. If a build
+ever disagrees with the reference, suspect the build.
 
 ## Licence
 
-OrcaSlicer is AGPL-3.0, so this is too. Note that this rules out App Store
-distribution: Apple's terms are incompatible with the GPL family, and the
-copyright isn't ours to add an exception to. SideStore or another sideloading
-route is the only distribution path.
+OrcaSlicer is AGPL-3.0, so this is too. That rules out App Store distribution:
+Apple's terms are incompatible with the GPL family, and the copyright is not ours
+to add an exception to. SideStore or another sideloading route is the only path.
