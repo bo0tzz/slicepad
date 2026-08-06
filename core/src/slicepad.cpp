@@ -1,4 +1,5 @@
 #include "slicepad.h"
+#include "thumbnail.hpp"
 
 #include <libslic3r/libslic3r.h>
 #include <libslic3r/Config.hpp>
@@ -10,6 +11,7 @@
 #include <libslic3r/Utils.hpp>
 #include <libslic3r/miniz_extension.hpp>
 #include <libslic3r/GCode/GCodeProcessor.hpp>
+#include <libslic3r/GCode/ThumbnailData.hpp>
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
@@ -600,7 +602,25 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         GCodeProcessorResult result;
         try {
             print.process();
-            print.export_gcode(out_gcode_path, &result, nullptr);
+            // Mainsail and Fluidd show whatever the G-code carries, and libslic3r
+            // does the PNG encoding and embedding — the callback only has to
+            // return pixels. It renders the mesh rather than the toolpath because
+            // it runs during export, before the moves exist.
+            const std::vector<float> &mesh = engine->mesh;
+            print.export_gcode(out_gcode_path, &result,
+                               [&mesh](const ThumbnailsParams &params) {
+                                   ThumbnailsList thumbnails;
+                                   for (const Vec2d &size : params.sizes) {
+                                       ThumbnailData data;
+                                       data.set(static_cast<unsigned>(size.x()),
+                                                static_cast<unsigned>(size.y()));
+                                       if (slicepad::render_mesh(mesh, data.width, data.height,
+                                                                 params.transparent_background,
+                                                                 data.pixels))
+                                           thumbnails.emplace_back(std::move(data));
+                                   }
+                                   return thumbnails;
+                               });
         } catch (const CanceledException &) {
             boost::filesystem::remove(out_gcode_path, ignored);
             engine->last_error = "cancelled";

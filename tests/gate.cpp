@@ -490,6 +490,64 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 11: thumbnails. libslic3r does the PNG encoding, so what is checked
+    // here is that our renderer supplied pixels at every size the profile asks
+    // for, and that they carry content — a blank frame compresses to a few
+    // hundred bytes, so the size floor separates a drawn model from an empty one.
+    if (failures == 0) {
+        const std::string with_thumbs = work + "/thumbnail.gcode";
+        if (sp_load_model(engine, (fixtures + "/model.3mf").c_str()) != SP_OK ||
+            sp_slice(engine, with_thumbs.c_str(), nullptr, nullptr) != SP_OK) {
+            failures += fail("gate11", std::string("slicing for thumbnails: ") + sp_last_error(engine));
+        } else {
+            // Sizes are compared per dimension against the desktop's own
+            // thumbnails rather than against a fixed floor: a flat threshold is
+            // meaningless across 300x300 and 32x32, where even the reference's
+            // small one is only 628 bytes.
+            auto thumbnails_in = [](const std::string &text) {
+                std::map<std::string, long> sizes;
+                for (const std::string &line : lines_of(text)) {
+                    const size_t at = line.find("thumbnail begin ");
+                    if (at == std::string::npos)
+                        continue;
+                    std::istringstream fields(line.substr(at + 16));
+                    std::string dims;
+                    long bytes = 0;
+                    if (fields >> dims >> bytes)
+                        sizes[dims] = bytes;
+                }
+                return sizes;
+            };
+
+            const auto ours_sizes = thumbnails_in(read_file(with_thumbs));
+            const auto their_sizes = thumbnails_in(read_file(reference));
+
+            if (ours_sizes.size() != their_sizes.size()) {
+                failures += fail("gate11", "produced " + std::to_string(ours_sizes.size()) +
+                                               " thumbnails against the desktop's " +
+                                               std::to_string(their_sizes.size()));
+            } else {
+                for (const auto &[dims, theirs] : their_sizes) {
+                    const auto found = ours_sizes.find(dims);
+                    if (found == ours_sizes.end()) {
+                        failures += fail("gate11", "no thumbnail at " + dims);
+                    } else if (found->second * 4 < theirs) {
+                        // A blank frame compresses to almost nothing, so a quarter
+                        // of the desktop's size still separates drawn from empty
+                        // while allowing for our simpler shading.
+                        failures += fail("gate11", dims + " thumbnail is " +
+                                                       std::to_string(found->second) +
+                                                       " bytes against the desktop's " +
+                                                       std::to_string(theirs));
+                    }
+                }
+                if (failures == 0)
+                    std::printf("gate11 thumbnails: %zu embedded at the desktop's sizes\n",
+                                ours_sizes.size());
+            }
+        }
+    }
+
     // Gate 10: failure paths, on a fresh engine so the checks above are undisturbed.
     // A UI shows these messages to a person, and picking the wrong file is the
     // likeliest mistake now that profile and model are separate surfaces — so

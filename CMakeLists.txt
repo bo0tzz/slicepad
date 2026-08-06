@@ -30,7 +30,7 @@ target_link_libraries(libslic3r PRIVATE nanosvg_impl)
 find_library(SLICEPAD_TBBMALLOC NAMES tbbmalloc REQUIRED)
 target_link_libraries(libslic3r_cgal PRIVATE ${SLICEPAD_TBBMALLOC})
 
-add_library(slicepad_core STATIC core/src/slicepad.cpp)
+add_library(slicepad_core STATIC core/src/slicepad.cpp core/src/thumbnail.cpp)
 target_include_directories(slicepad_core PUBLIC core/include)
 # libslic3r exports its generated-header dir publicly but keeps its source dir
 # private; Orca's own consumers pick up src/ from a directory-scoped
