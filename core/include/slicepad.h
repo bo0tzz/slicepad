@@ -103,9 +103,20 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
  * count, object bounding box. Valid until the next sp_slice. */
 const char *sp_slice_stats_json(const sp_engine *engine);
 
+/* Extruding moves from the last slice, as packed line segments: six floats per
+ * segment, (x1,y1,z1,x2,y2,z2) in bed millimetres. Travel, wipe and retract
+ * moves are excluded, so drawing every segment as a line gives the stacked-layer
+ * view directly — no parsing and no geometry generation, because the engine
+ * already produces this while slicing.
+ *
+ * The pointer is owned by the engine and valid until the next sp_slice; it is
+ * NULL when the count is zero. Feed it to a vertex buffer as-is. */
+size_t sp_toolpath_segment_count(const sp_engine *engine);
+const float *sp_toolpath_segments(const sp_engine *engine);
+
 /* The configuration the next slice would use — the loaded profile plus any
- * overrides — as "key = value" lines sorted
- * by key. That is deliberately the same shape Orca embeds in its own G-code, so
+ * overrides — as "key = value" lines sorted by key. That is deliberately the
+ * same shape Orca embeds in its own G-code, so
  * the two can be diffed directly to test profile resolution without slicing
  * anything. Valid until the next call on this engine. */
 const char *sp_resolved_config_text(sp_engine *engine);

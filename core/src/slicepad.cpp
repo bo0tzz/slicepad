@@ -33,6 +33,7 @@ struct sp_engine {
     std::string last_error;
     std::string stats_json = "{}";
     std::string config_text;
+    std::vector<float> toolpath;   // packed x1,y1,z1,x2,y2,z2 per segment
     bool config_loaded = false;
     bool model_loaded = false;
 };
@@ -84,6 +85,27 @@ bool extract_project_config(const std::string &path, std::string &out)
 // Extracts what a UI needs to show after a slice. Every figure here is checked
 // against the corresponding line Orca writes into its own G-code, so the values
 // agree with what the desktop reports for the same job.
+// The extruding moves as line segments, which is all a stacked-layer view needs.
+// A segment runs from the previous move's position to this one, so only moves
+// that actually deposit material contribute.
+std::vector<float> extract_toolpath(const GCodeProcessorResult &result)
+{
+    std::vector<float> segments;
+    bool have_previous = false;
+    Vec3f previous = Vec3f::Zero();
+
+    for (const auto &move : result.moves) {
+        if (move.type == EMoveType::Extrude && have_previous) {
+            segments.insert(segments.end(), {previous.x(), previous.y(), previous.z(),
+                                             move.position.x(), move.position.y(),
+                                             move.position.z()});
+        }
+        previous = move.position;
+        have_previous = true;
+    }
+    return segments;
+}
+
 std::string summarise(const Print &print, const GCodeProcessorResult &result,
                       const DynamicPrintConfig &config)
 {
@@ -412,6 +434,7 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         print.export_gcode(out_gcode_path, &result, nullptr);
 
         engine->stats_json = summarise(print, result, config);
+        engine->toolpath = extract_toolpath(result);
         return SP_OK;
     });
 }
@@ -436,6 +459,16 @@ const char *sp_resolved_config_text(sp_engine *engine)
         engine->config_text.clear();
     }
     return engine->config_text.c_str();
+}
+
+size_t sp_toolpath_segment_count(const sp_engine *engine)
+{
+    return engine ? engine->toolpath.size() / 6 : 0;
+}
+
+const float *sp_toolpath_segments(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->toolpath.empty()) ? engine->toolpath.data() : nullptr;
 }
 
 const char *sp_engine_version(void) { return SoftFever_VERSION; }

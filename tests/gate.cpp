@@ -260,6 +260,52 @@ int main(int argc, char **argv)
         }
         if (failures == 0)
             std::puts("gate3 stats: filament, layers and time agree with the desktop");
+
+        // Gate 4: the toolpath handed to a renderer must actually describe the
+        // printed object. Cheap to check and worth doing before any view is built
+        // on top of it: the tallest extrusion should reach the same height the
+        // desktop's G-code does.
+        const size_t segments = sp_toolpath_segment_count(engine);
+        const float *packed = sp_toolpath_segments(engine);
+        if (segments == 0 || packed == nullptr) {
+            failures += fail("gate4", "no toolpath segments produced");
+        } else {
+            float top = 0.0f;
+            for (size_t i = 0; i < segments * 6; i += 3)
+                top = std::max(top, packed[i + 2]);
+
+            // The highest Z at which the desktop actually extrudes. Not simply the
+            // highest Z move: the last one is the end-of-print lift, a travel, so
+            // comparing against that overstates the object by one hop.
+            double reference_top = 0.0;
+            double current_z = 0.0;
+            for (const std::string &line : lines_of(ref)) {
+                if (line.rfind("G1", 0) != 0)
+                    continue;
+                const size_t z_at = line.find(" Z");
+                if (z_at != std::string::npos)
+                    current_z = std::strtod(line.c_str() + z_at + 2, nullptr);
+                // Values are written like "E.33867", so the character after " E"
+                // is often a decimal point; only a leading '-' means retraction.
+                const size_t e_at = line.find(" E");
+                const char after_e = e_at != std::string::npos ? line[e_at + 2] : '\0';
+                const bool extruding =
+                    e_at != std::string::npos &&
+                    (std::isdigit(static_cast<unsigned char>(after_e)) || after_e == '.');
+                if (extruding && line.find(" X") != std::string::npos)
+                    reference_top = std::max(reference_top, current_z);
+            }
+
+            if (reference_top <= 0.0)
+                failures += fail("gate4", "no Z moves found in the reference");
+            else if (std::fabs(top - reference_top) / reference_top > 0.01)
+                failures += fail("gate4", "toolpath top " + std::to_string(top) +
+                                              " but the desktop reaches " +
+                                              std::to_string(reference_top));
+            else
+                std::printf("gate4 toolpath: %zu segments, top %.2fmm matches the desktop\n",
+                            segments, double(top));
+        }
     }
 
     sp_engine_destroy(engine);

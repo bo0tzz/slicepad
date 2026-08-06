@@ -120,6 +120,8 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "\nwrote %s\n", opt.output.c_str());
             std::fputs(sp_slice_stats_json(engine), stdout);
             std::fputc('\n', stdout);
+            std::fprintf(stderr, "toolpath: %zu segments\n",
+                         sp_toolpath_segment_count(engine));
         }
     } else {
         std::fprintf(stderr, "error: unknown command %s\n", opt.command.c_str());
