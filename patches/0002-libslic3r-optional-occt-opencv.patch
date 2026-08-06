@@ -158,10 +158,26 @@ index 095251c3..bbb868c4 100644
  }; // namespace Slic3r
 +#endif // !SLIC3R_NO_OCCT
 diff --git a/src/libslic3r/Model.cpp b/src/libslic3r/Model.cpp
-index d1ca3cf8..eaa91f16 100644
+index d1ca3cf8..10ba4c9b 100644
 --- a/src/libslic3r/Model.cpp
 +++ b/src/libslic3r/Model.cpp
-@@ -309,8 +309,10 @@ Model Model::read_from_file(const std::string&
+@@ -182,6 +182,7 @@ Model::~Model()
+         Slic3r::remove_backup(*this, true);
+ }
+ 
++#ifndef SLIC3R_NO_OCCT
+ Model Model::read_from_step(const std::string&                                      input_file,
+                             LoadStrategy                                            options,
+                             ImportStepProgressFn                                    stepFn,
+@@ -235,6 +236,7 @@ _finished:
+ 
+     return model;
+ }
++#endif // !SLIC3R_NO_OCCT
+ 
+ // BBS: add part plate related logic
+ // BBS: backup & restore
+@@ -309,8 +311,10 @@ Model Model::read_from_file(const std::string&
              }*/
          }
      }
@@ -172,6 +188,27 @@ index d1ca3cf8..eaa91f16 100644
      //BBS: remove the old .amf.xml files
      //else if (boost::algorithm::iends_with(input_file, ".amf") || boost::algorithm::iends_with(input_file, ".amf.xml"))
      else if (boost::algorithm::iends_with(input_file, ".drc"))
+diff --git a/src/libslic3r/Model.hpp b/src/libslic3r/Model.hpp
+index d8697adb..cb9b1100 100644
+--- a/src/libslic3r/Model.hpp
++++ b/src/libslic3r/Model.hpp
+@@ -1583,6 +1583,8 @@ public:
+ 
+     OBJECTBASE_DERIVED_COPY_MOVE_CLONE(Model)
+ 
++#ifndef SLIC3R_NO_OCCT
++    // Signature is built from OCCT-backed types declared in Format/STEP.hpp.
+     static Model read_from_step(const std::string&                                      input_file,
+                                 LoadStrategy                                            options,
+                                 ImportStepProgressFn                                    stepFn,
+@@ -1591,6 +1593,7 @@ public:
+                                 double                                                  linear_defletion,
+                                 double                                                  angle_defletion,
+                                 bool                                                    is_split_compound);
++#endif
+ 
+     //BBS: add part plate related logic
+     // BBS: backup
 diff --git a/src/libslic3r/ObjColorUtils.cpp b/src/libslic3r/ObjColorUtils.cpp
 index 37612674..91f7bff4 100644
 --- a/src/libslic3r/ObjColorUtils.cpp
