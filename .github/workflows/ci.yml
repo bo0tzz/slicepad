@@ -20,6 +20,14 @@ jobs:
         with:
           experimental: true
 
+      # The autotools dependencies are handed CC as an absolute path inside
+      # Xcode.app with CFLAGS that carry -mmacosx-version-min but no -isysroot,
+      # so clang has no SDK to link against and even "int main(){return 0;}"
+      # fails — which is exactly the probe GMP's configure gives up on. clang
+      # honours SDKROOT from the environment, so set it for the whole job.
+      - name: Point the toolchain at an SDK
+        run: echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
+
       - name: Fetch and patch the engine
         run: mise run fetch
 
