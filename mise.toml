@@ -24,6 +24,10 @@ run = "./scripts/fetch-orca.sh"
 sources = ["scripts/fetch-orca.sh", "patches/*.patch"]
 outputs = ["third_party/orcaslicer/.slicepad-stamp"]
 
+[tasks.check-patches]
+description = "Verify patches/ reproduces the engine checkout"
+run = "./scripts/check-patches.sh"
+
 [tasks.deps]
 description = "Build the headless dependency set (long; ~14 external projects)"
 depends = ["fetch"]

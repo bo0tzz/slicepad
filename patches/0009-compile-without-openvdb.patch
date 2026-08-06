@@ -38,7 +38,7 @@ index f4441ba9..f41fd767 100644
  #endif // OPENVDBUTILS_HPP
 +#endif // !SLIC3R_NO_OPENVDB
 diff --git a/src/libslic3r/SLA/Hollowing.cpp b/src/libslic3r/SLA/Hollowing.cpp
-index df621277..fc87645c 100644
+index df621277..0f454651 100644
 --- a/src/libslic3r/SLA/Hollowing.cpp
 +++ b/src/libslic3r/SLA/Hollowing.cpp
 @@ -1,7 +1,9 @@
@@ -104,12 +104,14 @@ index df621277..fc87645c 100644
  void hollow_mesh(TriangleMesh &mesh, const HollowingConfig &cfg, int flags)
  {
      InteriorPtr interior = generate_interior(mesh, cfg, JobController{});
-@@ -561,3 +595,5 @@ void remove_inside_triangles(TriangleMesh &mesh, const Interior &interior,
+@@ -560,4 +594,6 @@ void remove_inside_triangles(TriangleMesh &mesh, const Interior &interior,
+     //FIXME do we want to repair the mesh? Are there duplicate vertices or flipped triangles?
  }
  
- }} // namespace Slic3r::sla
-+
+-}} // namespace Slic3r::sla
 +#endif // !SLIC3R_NO_OPENVDB
++
++}} // namespace Slic3r::sla
 \ No newline at end of file
 diff --git a/src/libslic3r/CMakeLists.txt b/src/libslic3r/CMakeLists.txt
 index 4f2ba3b3..e2f51421 100644

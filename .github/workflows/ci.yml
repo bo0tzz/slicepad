@@ -49,6 +49,12 @@ jobs:
       - name: Fetch and patch the engine
         run: mise run fetch
 
+      # Cheap, and it catches a patch that has drifted from the checkout it was
+      # taken from — which otherwise only shows up as a build that works on the
+      # author's machine and nowhere else.
+      - name: Check the patch stack reproduces the checkout
+        run: mise run check-patches
+
       # Dependencies change only when the pin or the patch stack moves, so in
       # steady state this restores instead of building, and during bring-up a
       # failure does not discard the ones that already succeeded.
