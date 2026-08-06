@@ -21,6 +21,15 @@ add_library(nanosvg_impl STATIC core/src/nanosvg_impl.c)
 target_link_libraries(nanosvg_impl PRIVATE nanosvg)
 target_link_libraries(libslic3r PRIVATE nanosvg_impl)
 
+# libslic3r_cgal instantiates tbb::scalable_allocator but does not link
+# tbbmalloc, which supplies scalable_malloc/scalable_free. The GCC build gets
+# away with it because those calls happen to be elided or resolved through
+# libslic3r's own link line; clang leaves the references and the link fails.
+# Resolved by path rather than through TBB::tbbmalloc: that imported target is
+# scoped to Orca's directory and is not visible here.
+find_library(SLICEPAD_TBBMALLOC NAMES tbbmalloc REQUIRED)
+target_link_libraries(libslic3r_cgal PRIVATE ${SLICEPAD_TBBMALLOC})
+
 add_library(slicepad_core STATIC core/src/slicepad.cpp)
 target_include_directories(slicepad_core PUBLIC core/include)
 # libslic3r exports its generated-header dir publicly but keeps its source dir
