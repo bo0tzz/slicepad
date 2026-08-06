@@ -22,6 +22,13 @@ jobs:
 
       # MPFR runs autoreconf before configuring, and the runner image does not
       # ship autoconf, automake or libtool.
+      #
+      # Via brew rather than mise, which pins everything else here: none of the
+      # three are in mise's registry, and they are not the kind of thing its
+      # backends carry — aqua and ubi distribute release binaries, while these are
+      # GNU shell-script tooling. So they are unpinned, unlike cmake and ninja.
+      # Tolerable because they only regenerate a configure script and never touch
+      # the engine's output, which the gates would catch anyway.
       - name: Install autotools
         run: brew install autoconf automake libtool
 
