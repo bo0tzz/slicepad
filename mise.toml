@@ -63,4 +63,4 @@ run = [
     "./scripts/heavy.sh cmake --build $ORCA_BUILD --target libslic3r --parallel ${BUILD_JOBS:-3}",
 ]
 sources = ["patches/*.patch"]
-outputs = ["build/orca/src/libslic3r/libslic3r.a"]
+outputs = ["build/orca/src/libslic3r/liblibslic3r.a"]
