@@ -31,3 +31,13 @@ target_link_libraries(slicepad_core PUBLIC libslic3r)
 
 add_executable(slicepad-cli cli/main.cpp)
 target_link_libraries(slicepad-cli PRIVATE slicepad_core)
+
+# Plain C++ over the C ABI with no platform dependencies, so the same test runs
+# on the Linux dev machine and on the iOS Simulator in CI.
+add_executable(slicepad-gate tests/gate.cpp)
+target_link_libraries(slicepad-gate PRIVATE slicepad_core)
+
+enable_testing()
+add_test(NAME gates
+         COMMAND slicepad-gate ${CMAKE_CURRENT_SOURCE_DIR}/testdata
+                               ${CMAKE_CURRENT_BINARY_DIR}/gate-work)
