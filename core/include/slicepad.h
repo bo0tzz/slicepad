@@ -23,28 +23,30 @@ typedef struct sp_engine sp_engine;
 typedef enum {
     SP_OK = 0,
     SP_ERR_IO = 1,          /* file missing, unreadable, or not the claimed format */
-    SP_ERR_PARSE = 2,       /* malformed profile bundle, model, or override JSON */
-    SP_ERR_UNRESOLVED = 3,  /* an `inherits` parent is not in the bundled profiles */
-    SP_ERR_STATE = 4,       /* required preset or model not selected yet */
+    SP_ERR_PARSE = 2,       /* malformed project, model, or override JSON */
+    SP_ERR_UNRESOLVED = 3,  /* the project carries no usable configuration */
+    SP_ERR_STATE = 4,       /* no profile or model loaded yet */
     SP_ERR_SLICE = 5,       /* the engine rejected the job (see sp_last_error) */
     SP_ERR_CANCELLED = 6,
 } sp_result;
 
-typedef enum {
-    SP_PRESET_MACHINE = 0,
-    SP_PRESET_PROCESS = 1,
-    SP_PRESET_FILAMENT = 2,
-} sp_preset_kind;
+/* Note there is no notion of presets here, deliberately. A profile arrives as a
+ * project .3mf saved by desktop Orca, whose Metadata/project_settings.config
+ * holds the printer, process and filament settings already merged — 655 keys for
+ * a real SV08 profile. Consuming that instead of an exported preset bundle means
+ * no `inherits` chains to resolve, no vendor profiles to ship, and no dependence
+ * on PresetBundle, whose preset resolution is built around GUI and cloud-sync
+ * state that does not exist here. */
 
 /* Return 0 to continue slicing, non-zero to cancel (yields SP_ERR_CANCELLED).
  * `stage` is an engine phase name such as "Generating perimeters"; it is only
  * valid for the duration of the call. */
 typedef int (*sp_progress_fn)(int percent, const char *stage, void *user);
 
-/* `resources_dir` is the OrcaSlicer resources tree shipped in the app bundle —
- * the directory containing profiles/, which is what `inherits` chains resolve
- * against. `data_dir` must be writable: the preset machinery stores imported
- * user presets there, so on iOS it belongs under Application Support. */
+/* `resources_dir` is the OrcaSlicer resources tree shipped in the app bundle.
+ * `data_dir` must be writable. Neither needs to contain profiles/ any more, since
+ * profiles arrive fully resolved; they are still set because libslic3r reads
+ * other things from both. On iOS, data_dir belongs under Application Support. */
 sp_engine *sp_engine_create(const char *resources_dir, const char *data_dir);
 void sp_engine_destroy(sp_engine *engine);
 
@@ -52,15 +54,16 @@ void sp_engine_destroy(sp_engine *engine);
  * next call on this engine. Never NULL. */
 const char *sp_last_error(const sp_engine *engine);
 
-/* Load presets from an .orca_bundle (zip), or a single .orca_printer /
- * .orca_filament / .json preset file. Merges into any already loaded, so a
- * printer bundle and separately exported filaments can be combined. */
-sp_result sp_load_presets(sp_engine *engine, const char *path);
+/* Load a profile from a project .3mf saved by desktop OrcaSlicer (File → Save
+ * Project As). The geometry in it is ignored — only the resolved configuration
+ * is kept — so one "profile carrier" project can be exported when the profile
+ * changes and reused for every model afterwards. */
+sp_result sp_load_config(sp_engine *engine, const char *path);
 
-int sp_preset_count(const sp_engine *engine, sp_preset_kind kind);
-/* Valid until the next sp_load_presets. Returns NULL if index is out of range. */
-const char *sp_preset_name(const sp_engine *engine, sp_preset_kind kind, int index);
-sp_result sp_select_preset(sp_engine *engine, sp_preset_kind kind, const char *name);
+/* The engine version the profile was written by, if the project records one.
+ * Returns an empty string when absent. A profile from a different OrcaSlicer
+ * version than sp_engine_version() may not slice identically. */
+const char *sp_config_source_version(const sp_engine *engine);
 
 /* Replaces any previously loaded model. Accepts .stl, .3mf, and .obj — note
  * that STEP is deliberately not built, so OCCT is absent. */
@@ -76,8 +79,8 @@ sp_result sp_set_transform(sp_engine *engine, int object_index,
 /* Drop objects onto the bed and space them out, mirroring Orca's arrange. */
 sp_result sp_arrange(sp_engine *engine);
 
-/* Config overrides layered on top of the selected process preset — the "tweak
- * the basics" path.
+/* Config overrides layered on top of the loaded profile — the "tweak the
+ * basics" path.
  *
  * The shape is a fragment of an Orca preset file, not an encoding of our own:
  * an object of config keys to strings, or to arrays of strings for per-extruder
@@ -98,8 +101,8 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
  * count, object bounding box. Valid until the next sp_slice. */
 const char *sp_slice_stats_json(const sp_engine *engine);
 
-/* The fully merged configuration the next slice would use — selected presets
- * with `inherits` resolved, plus any overrides — as "key = value" lines sorted
+/* The configuration the next slice would use — the loaded profile plus any
+ * overrides — as "key = value" lines sorted
  * by key. That is deliberately the same shape Orca embeds in its own G-code, so
  * the two can be diffed directly to test profile resolution without slicing
  * anything. Valid until the next call on this engine. */

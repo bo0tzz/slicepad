@@ -3,28 +3,26 @@
 // Exists to exercise core/ on Linux at full speed, where the iPad app cannot be
 // iterated on. Two subcommands, matching the project's two correctness gates:
 //
-//   slicepad-cli config <bundle> [--printer N] [--process N] [--filament N]
-//       Resolves presets and prints the merged config as "key = value" lines,
-//       comparable against the config block Orca embeds in its G-code.
+//   slicepad-cli config <profile.3mf>
+//       Prints the configuration as "key = value" lines, comparable against the
+//       config block Orca embeds in its own G-code.
 //
-//   slicepad-cli slice <bundle> <model> -o <out.gcode> [selectors...]
+//   slicepad-cli slice <profile.3mf> <model> -o <out.gcode>
+//
+// <profile.3mf> is a project saved by desktop Orca; its geometry is ignored.
 #include "slicepad.h"
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <string>
 
 namespace {
 
 struct Options {
     std::string command;
-    std::string bundle;
+    std::string profile;
     std::string model;
     std::string output;
-    std::string printer;
-    std::string process;
-    std::string filament;
     std::string overrides;
 };
 
@@ -32,16 +30,18 @@ void usage()
 {
     std::fputs(
         "usage:\n"
-        "  slicepad-cli config <bundle> [selectors]\n"
-        "  slicepad-cli slice  <bundle> <model> -o <out.gcode> [selectors]\n"
+        "  slicepad-cli config <profile.3mf> [--overrides JSON]\n"
+        "  slicepad-cli slice  <profile.3mf> <model> -o <out.gcode> [--overrides JSON]\n"
         "\n"
-        "selectors:\n"
-        "  --printer NAME   --process NAME   --filament NAME\n"
-        "  --overrides JSON   config overrides, as an Orca preset fragment\n"
+        "  <profile.3mf>  a project saved by desktop Orca (File > Save Project As);\n"
+        "                 only its configuration is used, not its geometry\n"
+        "  --overrides    config overrides as an Orca preset fragment, e.g.\n"
+        "                 '{\"sparse_infill_density\":\"25%\"}'\n"
         "\n"
         "environment:\n"
-        "  SLICEPAD_RESOURCES  OrcaSlicer resources dir (contains profiles/)\n"
-        "  SLICEPAD_DATA       writable dir for imported presets\n",
+        "  SLICEPAD_RESOURCES  OrcaSlicer resources dir\n"
+        "  SLICEPAD_DATA       writable working dir\n"
+        "  SLICEPAD_LOG        libslic3r log level (0 quiet, 4 debug)\n",
         stderr);
 }
 
@@ -50,17 +50,6 @@ int progress_line(int percent, const char *stage, void *)
     std::fprintf(stderr, "\r%3d%%  %-48s", percent, stage ? stage : "");
     std::fflush(stderr);
     return 0;
-}
-
-bool select(sp_engine *engine, sp_preset_kind kind, const std::string &name, const char *label)
-{
-    if (name.empty())
-        return true;
-    if (sp_select_preset(engine, kind, name.c_str()) != SP_OK) {
-        std::fprintf(stderr, "error: %s: %s\n", label, sp_last_error(engine));
-        return false;
-    }
-    return true;
 }
 
 } // namespace
@@ -78,18 +67,15 @@ int main(int argc, char **argv)
             dest = argv[++i];
         };
         if (arg == "-h" || arg == "--help") { usage(); return 0; }
-        else if (arg == "-o")           next(opt.output);
-        else if (arg == "--printer")    next(opt.printer);
-        else if (arg == "--process")    next(opt.process);
-        else if (arg == "--filament")   next(opt.filament);
-        else if (arg == "--overrides")  next(opt.overrides);
-        else if (opt.command.empty())   opt.command = arg;
-        else if (opt.bundle.empty())    opt.bundle = arg;
-        else if (opt.model.empty())     opt.model = arg;
+        else if (arg == "-o")          next(opt.output);
+        else if (arg == "--overrides") next(opt.overrides);
+        else if (opt.command.empty())  opt.command = arg;
+        else if (opt.profile.empty())  opt.profile = arg;
+        else if (opt.model.empty())    opt.model = arg;
         else { std::fprintf(stderr, "error: unexpected argument %s\n", arg.c_str()); return 2; }
     }
 
-    if (opt.command.empty() || opt.bundle.empty()) { usage(); return 2; }
+    if (opt.command.empty() || opt.profile.empty()) { usage(); return 2; }
 
     const char *resources = std::getenv("SLICEPAD_RESOURCES");
     const char *data = std::getenv("SLICEPAD_DATA");
@@ -105,33 +91,14 @@ int main(int argc, char **argv)
     }
 
     int status = 0;
-    if (sp_load_presets(engine, opt.bundle.c_str()) != SP_OK) {
-        std::fprintf(stderr, "error: loading presets: %s\n", sp_last_error(engine));
+    if (sp_load_config(engine, opt.profile.c_str()) != SP_OK) {
+        std::fprintf(stderr, "error: loading profile: %s\n", sp_last_error(engine));
         status = 1;
-    } else if (!select(engine, SP_PRESET_MACHINE, opt.printer, "printer") ||
-               !select(engine, SP_PRESET_PROCESS, opt.process, "process") ||
-               !select(engine, SP_PRESET_FILAMENT, opt.filament, "filament")) {
-        status = 1;
-    } else if (sp_set_overrides(engine, opt.overrides.empty() ? nullptr : opt.overrides.c_str()) != SP_OK) {
+    } else if (sp_set_overrides(engine, opt.overrides.empty() ? nullptr
+                                                             : opt.overrides.c_str()) != SP_OK) {
         std::fprintf(stderr, "error: overrides: %s\n", sp_last_error(engine));
         status = 1;
-    } else if (opt.command == "list") {
-        const struct { sp_preset_kind kind; const char *label; } kinds[] = {
-            {SP_PRESET_MACHINE,  "machine"},
-            {SP_PRESET_PROCESS,  "process"},
-            {SP_PRESET_FILAMENT, "filament"},
-        };
-        for (const auto &k : kinds) {
-            const int count = sp_preset_count(engine, k.kind);
-            std::printf("== %s (%d)\n", k.label, count);
-            for (int i = 0; i < count; ++i) {
-                const char *name = sp_preset_name(engine, k.kind, i);
-                std::printf("   %s\n", name ? name : "(null)");
-            }
-        }
     } else if (opt.command == "config") {
-        // Printed by the core so that the comparison covers exactly the config
-        // the slice would use.
         std::fputs(sp_resolved_config_text(engine), stdout);
     } else if (opt.command == "slice") {
         if (opt.model.empty() || opt.output.empty()) {
