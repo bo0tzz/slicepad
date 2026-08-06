@@ -12,6 +12,7 @@ ORCA_DIR = "{{config_root}}/third_party/orcaslicer"
 # cache should not be collateral damage.
 DEPS_BUILD = "{{config_root}}/build/deps"
 DEPS_CACHE = "{{config_root}}/build/dl-cache"
+ORCA_BUILD = "{{config_root}}/build/orca"
 # What we hand upstream as DESTDIR, and where things actually land: upstream
 # appends usr/local itself. DEPS_PREFIX is the CMAKE_PREFIX_PATH for our build.
 DEPS_DESTDIR = "{{config_root}}/build/deps-prefix"
@@ -41,3 +42,20 @@ run = [
 ]
 sources = ["patches/*.patch"]
 outputs = ["build/deps-prefix/usr/local/lib/libtbb.a"]
+
+[tasks.engine]
+description = "Build headless libslic3r"
+depends = ["deps"]
+run = [
+    """cmake -S $ORCA_DIR -B $ORCA_BUILD -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH=$DEPS_PREFIX \
+        -DSLIC3R_STATIC=ON \
+        -DSLIC3R_GUI=OFF \
+        -DSLIC3R_WITH_OCCT=OFF \
+        -DSLIC3R_WITH_OPENCV=OFF \
+        -DSLIC3R_WITH_OPENVDB=OFF""",
+    "./scripts/heavy.sh cmake --build $ORCA_BUILD --target libslic3r",
+]
+sources = ["patches/*.patch"]
+outputs = ["build/orca/src/libslic3r/libslic3r.a"]
