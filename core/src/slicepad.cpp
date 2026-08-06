@@ -411,7 +411,8 @@ int sp_object_count(const sp_engine *engine)
 }
 
 sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
-                           double rotate_z_deg, double translate_x, double translate_y)
+                           double rotate_x_deg, double rotate_y_deg, double rotate_z_deg,
+                           double translate_x, double translate_y)
 {
     return guard(engine, [&]() -> sp_result {
         if (!engine->model_loaded || object_index < 0 ||
@@ -419,17 +420,28 @@ sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
             engine->last_error = "no such object";
             return SP_ERR_STATE;
         }
+        if (scale <= 0.0) {
+            engine->last_error = "scale must be positive";
+            return SP_ERR_STATE;
+        }
         ModelObject *object = engine->model.objects[size_t(object_index)];
         if (object->instances.empty()) {
             engine->last_error = "object has no instances";
             return SP_ERR_STATE;
         }
+
+        const double to_radians = M_PI / 180.0;
         ModelInstance *instance = object->instances.front();
         instance->set_scaling_factor(Vec3d(scale, scale, scale));
-        instance->set_rotation(Z, rotate_z_deg * M_PI / 180.0);
+        instance->set_rotation(Vec3d(rotate_x_deg * to_radians, rotate_y_deg * to_radians,
+                                     rotate_z_deg * to_radians));
         instance->set_offset(Vec3d(translate_x, translate_y, instance->get_offset().z()));
         object->invalidate_bounding_box();
-        engine->mesh = extract_mesh(engine->model); // transforms are baked in
+
+        // Rotating about X or Y moves the object through the bed, so put it back
+        // down — the same thing the desktop does after any transform.
+        object->ensure_on_bed();
+        engine->mesh = extract_mesh(engine->model);
         return SP_OK;
     });
 }

@@ -82,11 +82,17 @@ int sp_model_repaired_errors(const sp_engine *engine);
 sp_result sp_load_model(sp_engine *engine, const char *path);
 int sp_object_count(const sp_engine *engine);
 
-/* Uniform scale plus Z rotation in degrees, applied about the object centre;
- * translation is in bed millimetres. This is the whole plate-editing model —
- * anything richer belongs in desktop Orca, not here. */
-sp_result sp_set_transform(sp_engine *engine, int object_index,
-                           double scale, double rotate_z_deg,
+/* Uniform scale, rotation about each axis in degrees, and translation in bed
+ * millimetres. Rotation is absolute rather than incremental, so a control can
+ * bind straight to it. X and Y rotation is what stands a part up: without it the
+ * only way to reorient a CAD export is sp_auto_orient.
+ *
+ * The object is dropped back onto the bed afterwards, since rotating about X or
+ * Y moves it through the print surface. Anything richer than this belongs in
+ * desktop Orca. */
+sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
+                           double rotate_x_deg, double rotate_y_deg,
+                           double rotate_z_deg,
                            double translate_x, double translate_y);
 /* Place objects on the bed using libslic3r's own arrange — the same code the
  * desktop's arrange button drives. Needs a profile loaded, since the bed comes

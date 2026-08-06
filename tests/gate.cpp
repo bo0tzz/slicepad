@@ -448,6 +448,48 @@ int main(int argc, char **argv)
                         calls);
     }
 
+    // Gate 9: the transform controls a UI binds to. Rotation about X or Y is the
+    // part that matters — it is how a part stands up — and it is checked by the
+    // dimensions it must produce rather than by inspecting a matrix.
+    if (failures == 0) {
+        const std::string raw = fixtures + "/model-shapr3d.3mf";
+        float before[6] = {0}, rotated[6] = {0}, scaled[6] = {0};
+        auto extent = [](const float *b, int axis) { return b[axis + 3] - b[axis]; };
+
+        if (sp_load_model(engine, raw.c_str()) != SP_OK ||
+            sp_object_bounds(engine, 0, before) != SP_OK) {
+            failures += fail("gate9", std::string("reloading the raw export: ") + sp_last_error(engine));
+        } else if (sp_set_transform(engine, 0, 1.0, 90.0, 0.0, 0.0, 100.0, 100.0) != SP_OK ||
+                   sp_object_bounds(engine, 0, rotated) != SP_OK) {
+            failures += fail("gate9", std::string("rotating about X: ") + sp_last_error(engine));
+        } else {
+            // A quarter turn about X exchanges the Y and Z extents.
+            const bool swapped = std::fabs(extent(rotated, 1) - extent(before, 2)) < 0.05 &&
+                                 std::fabs(extent(rotated, 2) - extent(before, 1)) < 0.05;
+            if (!swapped)
+                failures += fail("gate9", "90 degrees about X gave " +
+                                              std::to_string(extent(rotated, 1)) + " x " +
+                                              std::to_string(extent(rotated, 2)) +
+                                              " in Y,Z from " + std::to_string(extent(before, 1)) +
+                                              " x " + std::to_string(extent(before, 2)));
+            if (rotated[2] < -0.05)
+                failures += fail("gate9", "rotation left the object below the bed");
+
+            if (sp_set_transform(engine, 0, 2.0, 0.0, 0.0, 0.0, 100.0, 100.0) != SP_OK ||
+                sp_object_bounds(engine, 0, scaled) != SP_OK) {
+                failures += fail("gate9", std::string("scaling: ") + sp_last_error(engine));
+            } else if (std::fabs(extent(scaled, 0) - 2 * extent(before, 0)) > 0.05) {
+                failures += fail("gate9", "scale 2 gave width " + std::to_string(extent(scaled, 0)) +
+                                              " from " + std::to_string(extent(before, 0)));
+            } else if (failures == 0) {
+                std::printf("gate9 transform: X rotation swaps Y/Z (%.1f/%.1f -> %.1f/%.1f), "
+                            "scale 2 doubles width\n",
+                            double(extent(before, 1)), double(extent(before, 2)),
+                            double(extent(rotated, 1)), double(extent(rotated, 2)));
+            }
+        }
+    }
+
     sp_engine_destroy(engine);
     if (failures == 0)
         std::puts("PASS");
