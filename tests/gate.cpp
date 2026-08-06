@@ -13,7 +13,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -99,6 +102,38 @@ bool is_known_diff(const std::string &key)
 {
     return std::any_of(kKnownConfigDiffs.begin(), kKnownConfigDiffs.end(),
                        [&](const auto &entry) { return key == entry.first; });
+}
+
+// Minimal extractors so the test stays free of a JSON dependency.
+double number_after(const std::string &text, const std::string &needle)
+{
+    const size_t at = text.find(needle);
+    if (at == std::string::npos)
+        return -1.0;
+    return std::strtod(text.c_str() + at + needle.size(), nullptr);
+}
+
+// "1m 44s", "2h 3m 5s" and bare "44s" all appear in Orca's output.
+double seconds_from_duration(const std::string &text)
+{
+    double total = 0.0;
+    double value = 0.0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (std::isdigit(static_cast<unsigned char>(text[i]))) {
+            value = value * 10 + (text[i] - '0');
+        } else if (text[i] == 'h') { total += value * 3600; value = 0; }
+        else if (text[i] == 'm') { total += value * 60;   value = 0; }
+        else if (text[i] == 's') { total += value;        value = 0; }
+    }
+    return total;
+}
+
+std::string line_containing(const std::string &text, const std::string &needle)
+{
+    for (const std::string &line : lines_of(text))
+        if (line.find(needle) != std::string::npos)
+            return line;
+    return {};
 }
 
 int fail(const char *gate, const std::string &detail)
@@ -190,6 +225,41 @@ int main(int argc, char **argv)
             else
                 std::printf("gate2 gcode: all %zu commands identical in sequence\n", ref.size());
         }
+    }
+
+    // Gate 3: the figures a UI shows must agree with what the desktop reports
+    // for the same job, since a number that is quietly wrong by a little is
+    // worse than one that is obviously missing.
+    if (failures == 0) {
+        const std::string stats = sp_slice_stats_json(engine);
+        const std::string ref = read_file(reference);
+
+        struct Check { const char *label; double ours; double theirs; double tolerance; };
+        const std::string time_line = line_containing(ref, "estimated printing time (normal mode)");
+        const Check checks[] = {
+            {"filament_mm", number_after(stats, "\"filament_mm\":"),
+             number_after(line_containing(ref, "filament used [mm]"), "= "), 0.01},
+            {"filament_grams", number_after(stats, "\"filament_grams\":"),
+             number_after(line_containing(ref, "total filament used [g]"), "= "), 0.01},
+            {"layer_count", number_after(stats, "\"layer_count\":"),
+             number_after(line_containing(ref, "total layer number:"), ": "), 0.0},
+            {"estimated_seconds", number_after(stats, "\"estimated_seconds\":"),
+             seconds_from_duration(time_line.substr(time_line.find("= ") + 2)), 0.01},
+        };
+
+        for (const Check &check : checks) {
+            if (check.theirs <= 0.0) {
+                failures += fail("gate3", std::string("no reference value for ") + check.label);
+                continue;
+            }
+            const double drift = std::fabs(check.ours - check.theirs) / check.theirs;
+            if (drift > check.tolerance)
+                failures += fail("gate3", std::string(check.label) + ": ours " +
+                                              std::to_string(check.ours) + ", desktop " +
+                                              std::to_string(check.theirs));
+        }
+        if (failures == 0)
+            std::puts("gate3 stats: filament, layers and time agree with the desktop");
     }
 
     sp_engine_destroy(engine);

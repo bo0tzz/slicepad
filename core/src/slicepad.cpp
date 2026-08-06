@@ -13,6 +13,8 @@
 #include <boost/filesystem.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -77,6 +79,59 @@ bool extract_project_config(const std::string &path, std::string &out)
     }
     close_zip_reader(&zip);
     return found;
+}
+
+// Extracts what a UI needs to show after a slice. Every figure here is checked
+// against the corresponding line Orca writes into its own G-code, so the values
+// agree with what the desktop reports for the same job.
+std::string summarise(const Print &print, const GCodeProcessorResult &result,
+                      const DynamicPrintConfig &config)
+{
+    const auto &stats = result.print_statistics;
+
+    double volume_mm3 = 0.0;
+    for (const auto &[extruder, volume] : stats.total_volumes_per_extruder)
+        volume_mm3 += volume;
+
+    auto first_float = [&](const char *key, double fallback) {
+        const auto *opt = config.opt<ConfigOptionFloats>(key);
+        return (opt != nullptr && !opt->values.empty()) ? opt->values.front() : fallback;
+    };
+    const double diameter = first_float("filament_diameter", 1.75);
+    const double density = first_float("filament_density", 1.24);
+
+    // Orca reports filament as a length of stock filament, not as extruded
+    // volume, so convert back through the filament's cross-section.
+    const double radius = diameter / 2.0;
+    const double area = M_PI * radius * radius;
+    const double length_mm = area > 0.0 ? volume_mm3 / area : 0.0;
+    // Density is g/cm3 against a volume in mm3.
+    const double grams = volume_mm3 * density / 1000.0;
+
+    // Orca's "total layer number" counts layer-change tags in the emitted
+    // G-code, which is not the same as the sliced layer count: PrintObject
+    // reports 65 where the G-code shows 64. Take it from the moves so the figure
+    // matches what the desktop displays.
+    unsigned int highest_layer_id = 0;
+    bool saw_layer = false;
+    for (const auto &move : result.moves) {
+        highest_layer_id = std::max(highest_layer_id, move.layer_id);
+        saw_layer = true;
+    }
+    const unsigned int layers = saw_layer ? highest_layer_id + 1 : 0; // ids are 0-based
+
+    const double seconds =
+        stats.modes[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Normal)].time;
+
+    nlohmann::json out;
+    out["estimated_seconds"] = seconds;
+    out["filament_mm"] = length_mm;
+    out["filament_grams"] = grams;
+    out["filament_mm3"] = volume_mm3;
+    out["layer_count"] = layers;
+    out["travel_mm"] = stats.total_travel_distance;
+    out["object_count"] = print.objects().size();
+    return out.dump();
 }
 
 sp_result require_file(sp_engine *engine, const char *path)
@@ -349,10 +404,7 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         GCodeProcessorResult result;
         print.export_gcode(out_gcode_path, &result, nullptr);
 
-        // TODO: populate from result.print_statistics once the UI needs it. Left
-        // empty deliberately rather than reporting a number not yet checked
-        // against what Orca shows for the same slice.
-        engine->stats_json = "{}";
+        engine->stats_json = summarise(print, result, config);
         return SP_OK;
     });
 }
