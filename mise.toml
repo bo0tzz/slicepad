@@ -55,7 +55,10 @@ run = [
         -DSLIC3R_WITH_OCCT=OFF \
         -DSLIC3R_WITH_OPENCV=OFF \
         -DSLIC3R_WITH_OPENVDB=OFF""",
-    "./scripts/heavy.sh cmake --build $ORCA_BUILD --target libslic3r",
+    # Explicit --parallel: the default is one job per core, and libslic3r's
+    # translation units are heavy enough (CGAL, Eigen, Boost templates) that
+    # 20-wide exhausts the memory budget. BUILD_JOBS overrides.
+    "./scripts/heavy.sh cmake --build $ORCA_BUILD --target libslic3r --parallel ${BUILD_JOBS:-4}",
 ]
 sources = ["patches/*.patch"]
 outputs = ["build/orca/src/libslic3r/libslic3r.a"]

@@ -23,6 +23,10 @@ fi
 
 mem_high=${HEAVY_MEM_HIGH:-8G}
 mem_max=${HEAVY_MEM_MAX:-12G}
+# Without a swap cap, MemoryHigh throttling turns into heavy swapping instead of
+# backpressure — a first attempt peaked at 8G resident but 16.6G of swap, which
+# makes the whole machine sluggish even though the memory limit was respected.
+mem_swap_max=${HEAVY_MEM_SWAP_MAX:-2G}
 nice_level=${HEAVY_NICE:-19}
 weight=${HEAVY_WEIGHT:-20}
 
@@ -37,6 +41,7 @@ if systemd-run --user --scope --quiet -- true >/dev/null 2>&1; then
     exec systemd-run --user --scope --quiet --collect \
         -p MemoryHigh="$mem_high" \
         -p MemoryMax="$mem_max" \
+        -p MemorySwapMax="$mem_swap_max" \
         -p CPUWeight="$weight" \
         -p IOWeight="$weight" \
         -- nice -n "$nice_level" "$@"
