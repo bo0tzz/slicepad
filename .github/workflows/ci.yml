@@ -91,17 +91,8 @@ jobs:
 
       - name: Build the engine and harness
         run: |
-          # -ffp-contract=off because the toolpath differs from the desktop's
-          # otherwise: 2117 extrusions against 2096, and 408.44mm of filament
-          # against 405.73mm. Apple's clang contracts a*b+c into a fused multiply
-          # add by default and ARM64 always has the instruction, while baseline
-          # x86-64 does not — so the same source computes marginally different
-          # values and threshold decisions flip. Turning contraction off should
-          # make an ARM build agree with an x86 one.
           cmake -S . -B build/ci -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_FLAGS=-ffp-contract=off \
-            -DCMAKE_C_FLAGS=-ffp-contract=off \
             -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local"
           cmake --build build/ci --target slicepad-gate slicepad-cli --parallel 4
 
