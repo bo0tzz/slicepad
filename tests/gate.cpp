@@ -213,7 +213,27 @@ int main(int argc, char **argv)
         if (ref.size() < 1000 || ours.size() < 1000) {
             failures += fail("gate2", "implausibly few commands — check the fixtures parsed");
         } else if (ref.size() != ours.size()) {
-            failures += fail("gate2", "command count differs");
+            // Summarise by opcode: a count mismatch says nothing about whether the
+            // toolpath moved or only travels and machine commands did.
+            auto tally = [](const std::vector<std::string> &cmds) {
+                std::map<std::string, size_t> counts;
+                for (const std::string &c : cmds)
+                    counts[c.substr(0, c.find_first_of(" \t"))]++;
+                return counts;
+            };
+            const auto theirs = tally(ref), mine = tally(ours);
+            std::string detail = "command count differs (" + std::to_string(ref.size()) +
+                                 " vs " + std::to_string(ours.size()) + "):";
+            for (const auto &[opcode, n] : theirs) {
+                const auto found = mine.find(opcode);
+                const size_t got = found == mine.end() ? 0 : found->second;
+                if (got != n)
+                    detail += " " + opcode + " " + std::to_string(n) + "->" + std::to_string(got);
+            }
+            for (const auto &[opcode, n] : mine)
+                if (theirs.find(opcode) == theirs.end())
+                    detail += " " + opcode + " 0->" + std::to_string(n);
+            failures += fail("gate2", detail);
         } else {
             size_t first_diff = ref.size();
             for (size_t i = 0; i < ref.size(); ++i)

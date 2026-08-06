@@ -100,3 +100,13 @@ jobs:
       # OrcaSlicer's G-code for a real profile and mesh.
       - name: Run correctness gates
         run: ctest --test-dir build/ci --output-on-failure
+
+      # Without the actual output there is no way to tell what differs, and each
+      # round trip here costs an hour.
+      - name: Keep the produced G-code
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcode-macos-arm64
+          path: build/ci/gate-work/*.gcode
+          if-no-files-found: warn
