@@ -12,6 +12,7 @@
 #include "slicepad.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <cstdio>
 #include <fstream>
 #include <map>
@@ -116,6 +117,14 @@ int main(int argc, char **argv)
     }
     const std::string fixtures = argv[1];
     const std::string work = argv[2];
+
+    // The engine writes a temporary profile here and the sliced G-code, so the
+    // directory has to exist before anything else. CI passes a path that does
+    // not exist yet.
+    std::error_code ec;
+    std::filesystem::create_directories(work, ec);
+    if (ec)
+        return fail("setup", "cannot create working directory " + work + ": " + ec.message());
 
     const std::string profile = fixtures + "/empty.3mf";
     const std::string model = fixtures + "/model.3mf";
