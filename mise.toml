@@ -37,7 +37,8 @@ run = [
         -DORCA_HEADLESS_DEPS=ON \
         -DORCA_DEPS_NPROC=${ORCA_DEPS_NPROC:-6} \
         -DDESTDIR=$DEPS_DESTDIR \
-        -DDEP_DOWNLOAD_DIR=$DEPS_CACHE""",
+        -DDEP_DOWNLOAD_DIR=$DEPS_CACHE \
+        ${DEPS_CMAKE_EXTRA:-}""",
     "./scripts/heavy.sh cmake --build $DEPS_BUILD -j1",
 ]
 sources = ["patches/*.patch"]

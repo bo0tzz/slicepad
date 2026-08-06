@@ -38,6 +38,17 @@ jobs:
         run: mise run deps
         env:
           ORCA_DEPS_NPROC: 4
+          # Orca's superbuild defaults the deployment target to macOS 11.3, which
+          # current Xcode will not target: every GMP compile probe fails and its
+          # configure reports "could not find a working compiler".
+          DEPS_CMAKE_EXTRA: -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+
+      # autotools dependencies explain themselves in config.log and nowhere else,
+      # so capture it rather than guessing across another round trip.
+      - name: Collect configure logs
+        if: failure()
+        run: |
+          find build/deps -name config.log -print -exec tail -60 {} \; || true
 
       - name: Build the engine and harness
         run: |
