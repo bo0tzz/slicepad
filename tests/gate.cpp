@@ -490,6 +490,55 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 10: failure paths, on a fresh engine so the checks above are undisturbed.
+    // A UI shows these messages to a person, and picking the wrong file is the
+    // likeliest mistake now that profile and model are separate surfaces — so
+    // each wrong input must be refused with the right code rather than
+    // half-succeeding.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (probe == nullptr) {
+            failures += fail("gate10", "could not create a second engine");
+        } else {
+            struct Case { const char *what; sp_result got; sp_result want; };
+            const std::string missing = fixtures + "/does-not-exist.3mf";
+            const std::string mesh_only = fixtures + "/model-shapr3d.3mf";
+            const std::string carrier = fixtures + "/empty.3mf";
+
+            const Case cases[] = {
+                {"profile that does not exist",
+                 sp_load_config(probe, missing.c_str()), SP_ERR_IO},
+                {"a bare mesh offered as a profile",
+                 sp_load_config(probe, mesh_only.c_str()), SP_ERR_UNRESOLVED},
+                {"slicing with nothing loaded",
+                 sp_slice(probe, (work + "/never.gcode").c_str(), nullptr, nullptr), SP_ERR_STATE},
+                {"model that does not exist",
+                 sp_load_model(probe, missing.c_str()), SP_ERR_IO},
+                {"a profile carrier offered as a model",
+                 sp_load_model(probe, carrier.c_str()), SP_ERR_SLICE},
+                {"unknown override key",
+                 sp_set_overrides(probe, "{\"not_a_real_key\":\"1\"}"), SP_ERR_PARSE},
+                {"override value of the wrong shape",
+                 sp_set_overrides(probe, "{\"wall_loops\":\"three\"}"), SP_ERR_PARSE},
+                {"malformed override JSON",
+                 sp_set_overrides(probe, "{oops"), SP_ERR_PARSE},
+            };
+
+            for (const Case &c : cases) {
+                if (c.got != c.want)
+                    failures += fail("gate10", std::string(c.what) + ": returned " +
+                                                   std::to_string(int(c.got)) + ", expected " +
+                                                   std::to_string(int(c.want)));
+                else if (std::string(sp_last_error(probe)).empty())
+                    failures += fail("gate10", std::string(c.what) + ": refused without a message");
+            }
+            if (failures == 0)
+                std::printf("gate10 failure paths: %zu wrong inputs each refused with a reason\n",
+                            sizeof(cases) / sizeof(cases[0]));
+            sp_engine_destroy(probe);
+        }
+    }
+
     sp_engine_destroy(engine);
     if (failures == 0)
         std::puts("PASS");
