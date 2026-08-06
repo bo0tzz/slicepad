@@ -541,6 +541,7 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         }
         if (out_gcode_path == nullptr)
             return SP_ERR_IO;
+        boost::system::error_code ignored;
 
         const DynamicPrintConfig config = effective_config(engine);
 
@@ -574,15 +575,25 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         }
 
         if (progress != nullptr) {
-            print.set_status_callback([progress, user](const PrintBase::SlicingStatus &status) {
-                progress(int(status.percent), status.text.c_str(), user);
+            // The callback's return value is how a caller cancels. libslic3r polls
+            // its cancel status between steps and unwinds with CanceledException,
+            // which has to be caught here: the guard around this lambda would
+            // otherwise report it as an ordinary slicing failure.
+            print.set_status_callback([progress, user, &print](const PrintBase::SlicingStatus &status) {
+                if (progress(int(status.percent), status.text.c_str(), user) != 0)
+                    print.cancel();
             });
         }
 
-        print.process();
-
         GCodeProcessorResult result;
-        print.export_gcode(out_gcode_path, &result, nullptr);
+        try {
+            print.process();
+            print.export_gcode(out_gcode_path, &result, nullptr);
+        } catch (const CanceledException &) {
+            boost::filesystem::remove(out_gcode_path, ignored);
+            engine->last_error = "cancelled";
+            return SP_ERR_CANCELLED;
+        }
 
         engine->stats_json = summarise(print, result, config);
         engine->toolpath = extract_toolpath(result);

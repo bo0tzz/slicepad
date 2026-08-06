@@ -389,6 +389,65 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 7: the three overrides the UI exposes. Accepting a key and validating
+    // it against PrintConfigDef proves nothing about whether it reaches the
+    // engine, so each is checked for reaching the G-code, in the direction it
+    // should move filament usage.
+    if (failures == 0) {
+        auto filament_for = [&](const char *overrides) -> double {
+            if (sp_set_overrides(engine, overrides) != SP_OK)
+                return -1.0;
+            const std::string out = work + "/override.gcode";
+            if (sp_slice(engine, out.c_str(), nullptr, nullptr) != SP_OK)
+                return -1.0;
+            return number_after(sp_slice_stats_json(engine), "\"filament_mm\":");
+        };
+
+        const double baseline = filament_for(nullptr);
+        const double thinner_walls = filament_for("{\"wall_loops\":\"1\"}");
+        const double denser_infill = filament_for("{\"sparse_infill_density\":\"60%\"}");
+
+        if (baseline <= 0.0 || thinner_walls <= 0.0 || denser_infill <= 0.0) {
+            failures += fail("gate7", std::string("an override slice failed: ") + sp_last_error(engine));
+        } else {
+            if (thinner_walls >= baseline)
+                failures += fail("gate7", "one wall loop used " + std::to_string(thinner_walls) +
+                                              "mm, not less than the baseline " +
+                                              std::to_string(baseline));
+            if (denser_infill <= baseline)
+                failures += fail("gate7", "60% infill used " + std::to_string(denser_infill) +
+                                              "mm, not more than the baseline " +
+                                              std::to_string(baseline));
+            if (failures == 0)
+                std::printf("gate7 overrides: baseline %.0fmm, one wall %.0fmm, dense infill %.0fmm\n",
+                            baseline, thinner_walls, denser_infill);
+        }
+        sp_set_overrides(engine, nullptr);
+    }
+
+    // Gate 8: cancellation, because the header promises it and a slice on a
+    // tablet runs long enough that a caller will want it. Also checks the partial
+    // file is cleaned up rather than left looking like a finished slice.
+    if (failures == 0) {
+        const std::string abandoned = work + "/cancelled.gcode";
+        int calls = 0;
+        auto cancel_immediately = [](int, const char *, void *counter) {
+            ++*static_cast<int *>(counter);
+            return 1; // non-zero means stop
+        };
+        const sp_result outcome = sp_slice(engine, abandoned.c_str(), cancel_immediately, &calls);
+        if (outcome != SP_ERR_CANCELLED)
+            failures += fail("gate8", "cancelling returned " + std::to_string(int(outcome)) +
+                                          " rather than SP_ERR_CANCELLED");
+        else if (calls == 0)
+            failures += fail("gate8", "the progress callback was never invoked");
+        else if (std::filesystem::exists(abandoned))
+            failures += fail("gate8", "a cancelled slice left its output file behind");
+        else
+            std::printf("gate8 cancellation: stopped after %d progress calls, no output left\n",
+                        calls);
+    }
+
     sp_engine_destroy(engine);
     if (failures == 0)
         std::puts("PASS");
