@@ -7,9 +7,15 @@ ninja = "1.13.2"
 
 [env]
 ORCA_DIR = "{{config_root}}/third_party/orcaslicer"
-# Where the superbuild installs. The path is upstream's convention, not ours —
-# deps/CMakeLists.txt derives it and appends usr/local itself.
-DEPS_PREFIX = "{{config_root}}/third_party/orcaslicer/deps/build/OrcaSlicer_dep/usr/local"
+# Deliberately outside third_party: fetch-orca.sh wipes that tree whenever the
+# pin or the patch set changes, and hours of dependency build plus the download
+# cache should not be collateral damage.
+DEPS_BUILD = "{{config_root}}/build/deps"
+DEPS_CACHE = "{{config_root}}/build/dl-cache"
+# What we hand upstream as DESTDIR, and where things actually land: upstream
+# appends usr/local itself. DEPS_PREFIX is the CMAKE_PREFIX_PATH for our build.
+DEPS_DESTDIR = "{{config_root}}/build/deps-prefix"
+DEPS_PREFIX = "{{config_root}}/build/deps-prefix/usr/local"
 
 [tasks.fetch]
 description = "Fetch the pinned OrcaSlicer source and apply patches/"
@@ -21,10 +27,17 @@ outputs = ["third_party/orcaslicer/.slicepad-stamp"]
 description = "Build the headless dependency set (long; ~14 external projects)"
 depends = ["fetch"]
 # -j1 at the top level is upstream's choice: each external project already
-# parallelises internally, and stacking both exhausts memory.
+# parallelises internally, and stacking both exhausts memory. ORCA_DEPS_NPROC
+# caps that inner fan-out — the detected default is 20-wide here, which OOMs the
+# machine when little memory is free. Raise it if you have headroom.
 run = [
-    "cmake -S $ORCA_DIR/deps -B $ORCA_DIR/deps/build -G Ninja -DORCA_HEADLESS_DEPS=ON -DCMAKE_BUILD_TYPE=Release",
-    "cmake --build $ORCA_DIR/deps/build -j1",
+    """cmake -S $ORCA_DIR/deps -B $DEPS_BUILD -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DORCA_HEADLESS_DEPS=ON \
+        -DORCA_DEPS_NPROC=${ORCA_DEPS_NPROC:-6} \
+        -DDESTDIR=$DEPS_DESTDIR \
+        -DDEP_DOWNLOAD_DIR=$DEPS_CACHE""",
+    "./scripts/heavy.sh cmake --build $DEPS_BUILD -j1",
 ]
 sources = ["patches/*.patch"]
-outputs = ["third_party/orcaslicer/deps/build/OrcaSlicer_dep/usr/local/lib/libtbb.so*"]
+outputs = ["build/deps-prefix/usr/local/lib/libtbb.so*"]

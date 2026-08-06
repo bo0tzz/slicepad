@@ -1,0 +1,31 @@
+# Allow overriding the per-dependency build parallelism.
+#
+# The superbuild builds each dependency with -j$(nproc). Detection looks at
+# core count alone, so a 20-core host with a few GB free fans out far enough
+# to OOM the machine rather than just the build. ORCA_DEPS_NPROC caps it;
+# the default is unchanged.
+
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index 6355aba1..bdabf189 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -48,10 +48,16 @@ endif ()
+ include(ExternalProject)
+ include(ProcessorCount)
+ 
+-ProcessorCount(NPROC)
+-if (NPROC EQUAL 0)
+-    set(NPROC 1)
++# Each dependency is built with -j${NPROC}. Detection is per-machine rather
++# than per-machine-and-workload, so on a many-core host with little free memory
++# the compile fans out far enough to OOM the whole box. Allow an override.
++ProcessorCount(_nproc_detected)
++set(ORCA_DEPS_NPROC "${_nproc_detected}" CACHE STRING
++    "Parallelism used for each dependency's own build (defaults to core count)")
++if (NOT ORCA_DEPS_NPROC OR ORCA_DEPS_NPROC EQUAL 0)
++    set(ORCA_DEPS_NPROC 1)
+ endif ()
++set(NPROC ${ORCA_DEPS_NPROC})
+ 
+ set(DEP_DOWNLOAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/DL_CACHE CACHE PATH "Path for downloaded source packages.")
+ set(FLATPAK FALSE CACHE BOOL "Toggles various build settings for flatpak, like /usr/local in DESTDIR or not building wxwidgets")
