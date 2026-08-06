@@ -34,7 +34,9 @@ jobs:
       # Tolerable because they only regenerate a configure script and never touch
       # the engine's output, which the gates would catch anyway.
       - name: Install autotools
-        run: brew install autoconf automake libtool
+        # texinfo too: autoreconf regenerates MPFR's build system, after which
+        # make wants to rebuild mpfr.info and needs makeinfo to do it.
+        run: brew install autoconf automake libtool texinfo
 
       # The autotools dependencies are handed CC as an absolute path inside
       # Xcode.app with CFLAGS that carry -mmacosx-version-min but no -isysroot,
