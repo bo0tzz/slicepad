@@ -9,6 +9,7 @@
 #include <libslic3r/miniz_extension.hpp>
 #include <libslic3r/GCode/GCodeProcessor.hpp>
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
 #include <nlohmann/json.hpp>
 
@@ -314,8 +315,20 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         if (out_gcode_path == nullptr)
             return SP_ERR_IO;
 
+        const DynamicPrintConfig config = effective_config(engine);
+
         Print print;
-        print.apply(engine->model, effective_config(engine));
+        print.apply(engine->model, config);
+
+        // Print::m_isBBLPrinter has no initialiser and is never assigned inside
+        // libslic3r — the GUI writes it through the is_BBL_printer() reference.
+        // Leaving it alone means indeterminate memory selects the G-code comment
+        // dialect: GCodeProcessor::reserved_tag() switches on it, emitting Bambu
+        // tags ("; CHANGE_LAYER") instead of the PrusaSlicer-compatible ones
+        // (";LAYER_CHANGE") that Klipper's exclude_object and the web UIs read.
+        const auto *printer_model = config.opt<ConfigOptionString>("printer_model");
+        print.is_BBL_printer() =
+            printer_model != nullptr && boost::starts_with(printer_model->value, "Bambu Lab");
 
         // validate() reports advisories through its out-param and real problems
         // through the return value, distinguished by is_warning.
