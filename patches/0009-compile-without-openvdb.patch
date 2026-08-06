@@ -1,0 +1,133 @@
+# Compile without OpenVDB rather than only linking without it.
+#
+# libslic3r includes OpenVDBUtils.hpp from SLA/Hollowing.cpp unconditionally, so
+# a build with OpenVDB disabled still needs its headers. It appears to work on any
+# machine with OpenVDB installed system-wide, which hides the problem until a
+# platform without it — where the include is simply fatal.
+#
+# SLA hollowing is voxel work and cannot exist without OpenVDB, so the dependent
+# code is guarded and the entry points SLAPrint references become stubs that
+# throw. DrainHole geometry is untouched; it needs no voxels.
+
+diff --git a/src/libslic3r/OpenVDBUtils.cpp b/src/libslic3r/OpenVDBUtils.cpp
+index 72c7668a..a1c65944 100644
+--- a/src/libslic3r/OpenVDBUtils.cpp
++++ b/src/libslic3r/OpenVDBUtils.cpp
+@@ -1,3 +1,4 @@
++#ifndef SLIC3R_NO_OPENVDB
+ #define NOMINMAX
+ #include "OpenVDBUtils.hpp"
+ 
+@@ -134,3 +135,4 @@ openvdb::FloatGrid::Ptr redistance_grid(const openvdb::FloatGrid &grid,
+ }
+ 
+ } // namespace Slic3r
++#endif // !SLIC3R_NO_OPENVDB
+diff --git a/src/libslic3r/OpenVDBUtils.hpp b/src/libslic3r/OpenVDBUtils.hpp
+index f4441ba9..f41fd767 100644
+--- a/src/libslic3r/OpenVDBUtils.hpp
++++ b/src/libslic3r/OpenVDBUtils.hpp
+@@ -1,3 +1,4 @@
++#ifndef SLIC3R_NO_OPENVDB
+ #ifndef OPENVDBUTILS_HPP
+ #define OPENVDBUTILS_HPP
+ 
+@@ -46,3 +47,4 @@ openvdb::FloatGrid::Ptr redistance_grid(const openvdb::FloatGrid &grid,
+ } // namespace Slic3r
+ 
+ #endif // OPENVDBUTILS_HPP
++#endif // !SLIC3R_NO_OPENVDB
+diff --git a/src/libslic3r/SLA/Hollowing.cpp b/src/libslic3r/SLA/Hollowing.cpp
+index df621277..fc87645c 100644
+--- a/src/libslic3r/SLA/Hollowing.cpp
++++ b/src/libslic3r/SLA/Hollowing.cpp
+@@ -1,7 +1,9 @@
+ #include <functional>
+ #include <optional>
+ 
++#ifndef SLIC3R_NO_OPENVDB
+ #include <libslic3r/OpenVDBUtils.hpp>
++#endif
+ #include <libslic3r/TriangleMesh.hpp>
+ #include <libslic3r/TriangleMeshSlicer.hpp>
+ #include <libslic3r/SLA/Hollowing.hpp>
+@@ -22,6 +24,7 @@
+ namespace Slic3r {
+ namespace sla {
+ 
++#ifndef SLIC3R_NO_OPENVDB
+ struct Interior {
+     indexed_triangle_set mesh;
+     openvdb::FloatGrid::Ptr gridptr;
+@@ -147,6 +150,36 @@ InteriorPtr generate_interior(const TriangleMesh &   mesh,
+     return interior;
+ }
+ 
++#else // SLIC3R_NO_OPENVDB
++
++// SLA hollowing is voxel work and OpenVDB is where the voxels live, so without it
++// the feature cannot exist. SLAPrint still references these symbols, so they are
++// stubbed rather than removed: an FFF build never reaches them, and anything that
++// does gets a clear error instead of a link failure.
++struct Interior {};
++
++void InteriorDeleter::operator()(Interior *p) { delete p; }
++
++static const char *no_openvdb = "SLA hollowing needs OpenVDB, which this build excludes";
++
++indexed_triangle_set &get_mesh(Interior &) { throw Slic3r::RuntimeError(no_openvdb); }
++const indexed_triangle_set &get_mesh(const Interior &) { throw Slic3r::RuntimeError(no_openvdb); }
++
++InteriorPtr generate_interior(const TriangleMesh &, const HollowingConfig &, const JobController &)
++{
++    throw Slic3r::RuntimeError(no_openvdb);
++}
++
++void hollow_mesh(TriangleMesh &, const HollowingConfig &, int) { throw Slic3r::RuntimeError(no_openvdb); }
++void hollow_mesh(TriangleMesh &, const Interior &, int) { throw Slic3r::RuntimeError(no_openvdb); }
++void remove_inside_triangles(TriangleMesh &, const Interior &, const std::vector<bool> &)
++{
++    throw Slic3r::RuntimeError(no_openvdb);
++}
++double get_distance(const Vec3f &, const Interior &) { throw Slic3r::RuntimeError(no_openvdb); }
++
++#endif // SLIC3R_NO_OPENVDB
++
+ indexed_triangle_set DrainHole::to_mesh() const
+ {
+     auto r = double(radius);
+@@ -301,6 +334,7 @@ void cut_drainholes(std::vector<ExPolygons> & obj_slices,
+         obj_slices[i] = diff_ex(obj_slices[i], hole_slices[i]);
+ }
+ 
++#ifndef SLIC3R_NO_OPENVDB
+ void hollow_mesh(TriangleMesh &mesh, const HollowingConfig &cfg, int flags)
+ {
+     InteriorPtr interior = generate_interior(mesh, cfg, JobController{});
+@@ -561,3 +595,5 @@ void remove_inside_triangles(TriangleMesh &mesh, const Interior &interior,
+ }
+ 
+ }} // namespace Slic3r::sla
++
++#endif // !SLIC3R_NO_OPENVDB
+\ No newline at end of file
+diff --git a/src/libslic3r/CMakeLists.txt b/src/libslic3r/CMakeLists.txt
+index 4f2ba3b3..e2f51421 100644
+--- a/src/libslic3r/CMakeLists.txt
++++ b/src/libslic3r/CMakeLists.txt
+@@ -13,9 +13,12 @@ if (MINGW)
+     add_compile_options(-Wa,-mbig-obj)
+ endif ()
+ 
+-set(OpenVDBUtils_SOURCES "")
+-if (TARGET OpenVDB::openvdb)
+-    set(OpenVDBUtils_SOURCES OpenVDBUtils.cpp OpenVDBUtils.hpp)
++set(OpenVDBUtils_SOURCES OpenVDBUtils.cpp OpenVDBUtils.hpp)
++if (NOT TARGET OpenVDB::openvdb)
++    # Without OpenVDB the guarded sources compile to nothing and SLA hollowing
++    # falls back to stubs. Kept in the source list so a new OpenVDB-using source
++    # fails loudly rather than silently losing a feature.
++    add_definitions(-DSLIC3R_NO_OPENVDB)
+ endif()
+ 
+ option(BUILD_SHARED_LIBS "Build shared libs" OFF)
