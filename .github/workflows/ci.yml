@@ -5,34 +5,16 @@ on:
   pull_request:
 
 jobs:
+  # macOS rather than Linux: Linux is covered by developing on it, whereas this
+  # is the only place Apple's clang, ld64 and SDK are exercised — where the
+  # portability bugs turned up — and the only place the gates can run on an
+  # Apple target without a device. iOS then adds cross-compilation on top of a
+  # target already known good.
   engine:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux is the development target and the clean-room check: it proves
-          # the patch stack applies and builds from nothing, which a local tree
-          # that has been hand-patched cannot.
-          - name: linux-gcc
-            os: ubuntu-24.04
-          # macOS uses Apple's clang, ld64 and SDK with no cross-toolchain file,
-          # so it de-risks the Apple toolchain while the gates still execute.
-          # iOS adds cross-compilation on top of a target this has cleared.
-          - name: macos-arm64
-            os: macos-26
+    name: macos-arm64
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install build prerequisites (Linux)
-        if: runner.os == 'Linux'
-        # m4 is required by GMP's configure; the rest are autotools deps of the
-        # dependency set. No GUI libraries: the engine builds headless.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential m4 autoconf automake libtool pkg-config texinfo
 
       - uses: jdx/mise-action@v2
         with:
@@ -42,24 +24,20 @@ jobs:
         run: mise run fetch
 
       # Dependencies change only when the pin or the patch stack moves, so in
-      # steady state this restores instead of building. Keyed per target because
-      # the artefacts are not portable between them.
+      # steady state this restores instead of building, and during bring-up a
+      # failure does not discard the ones that already succeeded.
       - name: Cache dependency prefix
         id: deps-cache
         uses: actions/cache@v4
         with:
           path: build/deps-prefix
-          key: deps-${{ matrix.name }}-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}
+          key: deps-macos-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}
 
       - name: Build dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: mise run deps
         env:
-          # Runners have more memory headroom than the dev machine, and this is
-          # the cold path we want to keep short.
           ORCA_DEPS_NPROC: 4
-          HEAVY_MEM_HIGH: 12G
-          HEAVY_MEM_MAX: 14G
 
       - name: Build the engine and harness
         run: |
@@ -67,8 +45,6 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local"
           cmake --build build/ci --target slicepad-gate slicepad-cli --parallel 4
-        env:
-          BUILD_JOBS: 4
 
       # The point of the whole exercise: the engine still reproduces desktop
       # OrcaSlicer's G-code for a real profile and mesh.
