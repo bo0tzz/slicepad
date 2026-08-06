@@ -1,0 +1,244 @@
+# Make OCCT and OpenCV optional in libslic3r.
+#
+# OCCT (26 TK* libraries) backs STEP/SVG import and text embossing; OpenCV
+# backs OBJ colour quantisation. Neither is reachable from mesh slicing, and
+# both are among the hardest dependencies to cross-compile.
+#
+# Guarded sources are wrapped rather than removed from the source list, so if
+# upstream adds an OCCT-using source it fails loudly on the next engine bump
+# instead of silently dropping a feature.
+
+diff --git a/src/libslic3r/CMakeLists.txt b/src/libslic3r/CMakeLists.txt
+index 9b67d7ab..4f2ba3b3 100644
+--- a/src/libslic3r/CMakeLists.txt
++++ b/src/libslic3r/CMakeLists.txt
+@@ -20,6 +20,14 @@ endif()
+ 
+ option(BUILD_SHARED_LIBS "Build shared libs" OFF)
+ 
++# OCCT provides STEP and SVG import plus text embossing; OpenCV provides OBJ
++# colour quantisation. Both are large and neither is reachable from plain mesh
++# slicing, so allow a build without them. The guarded sources compile to empty
++# translation units rather than being dropped from the list, so that a new
++# OCCT-using source upstream fails loudly at the next engine bump.
++option(SLIC3R_WITH_OCCT "Enable OCCT-backed STEP/SVG import and text shapes" ON)
++option(SLIC3R_WITH_OPENCV "Enable OpenCV-backed OBJ colour handling" ON)
++
+ set(lisbslic3r_sources
+     AABBMesh.cpp
+     AABBMesh.hpp
+@@ -497,7 +505,9 @@ set(CGAL_DO_NOT_WARN_ABOUT_CMAKE_BUILD_TYPE ON CACHE BOOL "" FORCE)
+ cmake_policy(PUSH)
+ cmake_policy(SET CMP0011 NEW)
+ find_package(CGAL REQUIRED)
+-find_package(OpenCV REQUIRED core)
++if (SLIC3R_WITH_OPENCV)
++    find_package(OpenCV REQUIRED core)
++endif ()
+ cmake_policy(POP)
+ 
+ add_library(libslic3r_cgal STATIC
+@@ -537,14 +547,16 @@ target_compile_definitions(libslic3r PUBLIC -DUSE_TBB -DTBB_USE_CAPTURED_EXCEPTI
+ target_include_directories(libslic3r PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+ target_include_directories(libslic3r SYSTEM PUBLIC ${EXPAT_INCLUDE_DIRS})
+ 
++find_package(JPEG REQUIRED)
++find_package(draco REQUIRED)
++
++set(OCCT_LIBS "")
++if (SLIC3R_WITH_OCCT)
+ # Find the OCCT and related libraries
+ set(OpenCASCADE_DIR "${CMAKE_PREFIX_PATH}/lib/cmake/occt")
+ find_package(OpenCASCADE REQUIRED)
+ target_include_directories(libslic3r SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
+ 
+-find_package(JPEG REQUIRED)
+-find_package(draco REQUIRED)
+-
+ set(OCCT_LIBS
+     TKXDESTEP
+     TKSTEP
+@@ -573,6 +585,16 @@ set(OCCT_LIBS
+     TKMath
+     TKernel
+ )
++else ()
++    target_compile_definitions(libslic3r PUBLIC SLIC3R_NO_OCCT)
++endif ()
++
++set(OPENCV_LIBS "")
++if (SLIC3R_WITH_OPENCV)
++    set(OPENCV_LIBS opencv_world)
++else ()
++    target_compile_definitions(libslic3r PUBLIC SLIC3R_NO_OPENCV)
++endif ()
+ 
+ target_link_libraries(libslic3r
+     PUBLIC
+@@ -581,7 +603,7 @@ target_link_libraries(libslic3r
+         libigl
+         libnest2d
+         miniz
+-        opencv_world
++        ${OPENCV_LIBS}
+     PRIVATE
+         ${CMAKE_DL_LIBS}
+         ${EXPAT_LIBRARIES}
+@@ -606,7 +628,7 @@ target_link_libraries(libslic3r
+         OpenSSL::Crypto
+     )
+ 
+-if(NOT WIN32)
++if(NOT WIN32 AND SLIC3R_WITH_OCCT)
+     # Link freetype for OCCT dependency (CAD operations need font rendering)
+     target_link_libraries(libslic3r PRIVATE ${FREETYPE_LIBRARIES})
+     if (NOT APPLE)
+diff --git a/src/libslic3r/Format/STEP.cpp b/src/libslic3r/Format/STEP.cpp
+index 3ea3de59..a3e799ab 100644
+--- a/src/libslic3r/Format/STEP.cpp
++++ b/src/libslic3r/Format/STEP.cpp
+@@ -1,3 +1,6 @@
++// Requires OCCT; see SLIC3R_WITH_OCCT
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OCCT
+ #include "../libslic3r.h"
+ #include "../Model.hpp"
+ #include "../TriangleMesh.hpp"
+@@ -746,3 +749,4 @@ unsigned int Step::get_triangle_num_tbb(double linear_defletion, double angle_de
+ }
+ 
+ }; // namespace Slic3r
++#endif // !SLIC3R_NO_OCCT
+diff --git a/src/libslic3r/Format/STEP.hpp b/src/libslic3r/Format/STEP.hpp
+index 32535535..5d28cc9f 100644
+--- a/src/libslic3r/Format/STEP.hpp
++++ b/src/libslic3r/Format/STEP.hpp
+@@ -1,3 +1,6 @@
++// Requires OCCT; see SLIC3R_WITH_OCCT
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OCCT
+ #ifndef slic3r_Format_STEP_hpp_
+ #define slic3r_Format_STEP_hpp_
+ #include "XCAFDoc_DocumentTool.hxx"
+@@ -122,3 +125,4 @@ private:
+ }; // namespace Slic3r
+ 
+ #endif /* slic3r_Format_STEP_hpp_ */
++#endif // !SLIC3R_NO_OCCT
+diff --git a/src/libslic3r/Format/svg.cpp b/src/libslic3r/Format/svg.cpp
+index 7bfd73b9..20606da7 100644
+--- a/src/libslic3r/Format/svg.cpp
++++ b/src/libslic3r/Format/svg.cpp
+@@ -1,3 +1,6 @@
++// Requires OCCT; see SLIC3R_WITH_OCCT
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OCCT
+ #include "libslic3r/ClipperUtils.hpp"
+ #include "../libslic3r.h"
+ #include "../Model.hpp"
+@@ -400,3 +403,4 @@ bool load_svg(const char *path, Model *model, std::string &message)
+     return true;
+ }
+ } // namespace Slic3r
++#endif // !SLIC3R_NO_OCCT
+diff --git a/src/libslic3r/Format/svg.hpp b/src/libslic3r/Format/svg.hpp
+index 095251c3..bbb868c4 100644
+--- a/src/libslic3r/Format/svg.hpp
++++ b/src/libslic3r/Format/svg.hpp
+@@ -1,3 +1,6 @@
++// Requires OCCT; see SLIC3R_WITH_OCCT
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OCCT
+ #pragma once
+ namespace Slic3r {
+ class Model;
+@@ -5,3 +8,4 @@ class Model;
+ extern bool load_svg(const char *path, Model *model, std::string &message);
+ 
+ }; // namespace Slic3r
++#endif // !SLIC3R_NO_OCCT
+diff --git a/src/libslic3r/Model.cpp b/src/libslic3r/Model.cpp
+index d1ca3cf8..eaa91f16 100644
+--- a/src/libslic3r/Model.cpp
++++ b/src/libslic3r/Model.cpp
+@@ -309,8 +309,10 @@ Model Model::read_from_file(const std::string&
+             }*/
+         }
+     }
++#ifndef SLIC3R_NO_OCCT
+     else if (boost::algorithm::iends_with(input_file, ".svg"))
+         result = load_svg(input_file.c_str(), &model, message);
++#endif
+     //BBS: remove the old .amf.xml files
+     //else if (boost::algorithm::iends_with(input_file, ".amf") || boost::algorithm::iends_with(input_file, ".amf.xml"))
+     else if (boost::algorithm::iends_with(input_file, ".drc"))
+diff --git a/src/libslic3r/ObjColorUtils.cpp b/src/libslic3r/ObjColorUtils.cpp
+index 37612674..91f7bff4 100644
+--- a/src/libslic3r/ObjColorUtils.cpp
++++ b/src/libslic3r/ObjColorUtils.cpp
+@@ -1,3 +1,6 @@
++// Requires OpenCV; see SLIC3R_WITH_OPENCV
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OPENCV
+ #include "ObjColorUtils.hpp"
+ 
+ bool obj_color_deal_algo(std::vector<Slic3r::RGBA> & input_colors,
+@@ -12,4 +15,5 @@ bool obj_color_deal_algo(std::vector<Slic3r::RGBA> & input_colors,
+         return false;
+     }
+     return true;
+-}
+\ No newline at end of file
++}
++#endif // !SLIC3R_NO_OPENCV
+diff --git a/src/libslic3r/ObjColorUtils.hpp b/src/libslic3r/ObjColorUtils.hpp
+index b587c808..9d98659b 100644
+--- a/src/libslic3r/ObjColorUtils.hpp
++++ b/src/libslic3r/ObjColorUtils.hpp
+@@ -1,3 +1,6 @@
++// Requires OpenCV; see SLIC3R_WITH_OPENCV
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OPENCV
+ #pragma once
+ #include <iostream>
+ #include <ctime>
+@@ -265,4 +268,5 @@ bool obj_color_deal_algo(std::vector<Slic3r::RGBA> &input_colors,
+                          std::vector<Slic3r::RGBA>&   cluster_colors_from_algo,
+                          std::vector<int>&            cluster_labels_from_algo,
+                          char &                     cluster_number,
+-                         int                        max_cluster);
+\ No newline at end of file
++                         int                        max_cluster);
++#endif // !SLIC3R_NO_OPENCV
+diff --git a/src/libslic3r/Shape/TextShape.cpp b/src/libslic3r/Shape/TextShape.cpp
+index dce731af..17ca54ff 100644
+--- a/src/libslic3r/Shape/TextShape.cpp
++++ b/src/libslic3r/Shape/TextShape.cpp
+@@ -1,3 +1,6 @@
++// Requires OCCT; see SLIC3R_WITH_OCCT
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OCCT
+ #include "../libslic3r.h"
+ #include "../Model.hpp"
+ #include "../TriangleMesh.hpp"
+@@ -270,3 +273,4 @@ void load_text_shape(const char*text, const char* font, const float text_height,
+ }
+ 
+ }; // namespace Slic3r
++#endif // !SLIC3R_NO_OCCT
+diff --git a/src/libslic3r/Shape/TextShape.hpp b/src/libslic3r/Shape/TextShape.hpp
+index d093c2da..cfe664b5 100644
+--- a/src/libslic3r/Shape/TextShape.hpp
++++ b/src/libslic3r/Shape/TextShape.hpp
+@@ -1,3 +1,6 @@
++// Requires OCCT; see SLIC3R_WITH_OCCT
++// in CMakeLists.txt. Compiles to an empty translation unit when disabled.
++#ifndef SLIC3R_NO_OCCT
+ #ifndef slic3r_Text_Shape_hpp_
+ #define slic3r_Text_Shape_hpp_
+ 
+@@ -20,3 +23,4 @@ std::map<std::string, std::string> get_occt_fonts_maps();
+ }; // namespace Slic3r
+ 
+ #endif // slic3r_Text_Shape_hpp_
++#endif // !SLIC3R_NO_OCCT

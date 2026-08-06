@@ -1,0 +1,120 @@
+# Add ORCA_HEADLESS_DEPS to the dependency superbuild.
+#
+# The superbuild is all-or-nothing: it builds wxWidgets, OCCT, OpenCV and the
+# OpenVDB stack even when the main project is configured with SLIC3R_GUI=OFF.
+# libslic3r needs none of them (OpenVDB is already optional upstream), so a
+# headless consumer pays hours of build time for artifacts it discards.
+#
+# Delete this patch if upstream grows a headless dependency mode.
+
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index dbbf9a04..6355aba1 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -111,6 +111,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+     option(DEP_WX_GTK3 "Build wxWidgets against GTK3" ON)
+ endif()
+ 
++# Build only what libslic3r itself needs, skipping the GUI toolkit, the CAD
++# kernel and the OpenVDB stack. Pairs with -DSLIC3R_GUI=OFF -DSLIC3R_WITH_OCCT=OFF
++# -DSLIC3R_WITH_OPENCV=OFF in the main project.
++option(ORCA_HEADLESS_DEPS "Skip dependencies only the GUI and CAD features need" OFF)
++
+ set(IS_CROSS_COMPILE FALSE)
+ 
+ if (APPLE)
+@@ -338,16 +343,21 @@ include(Boost/Boost.cmake)
+ 
+ include(Cereal/Cereal.cmake)
+ include(Qhull/Qhull.cmake)
+-include(GLEW/GLEW.cmake)
+ 
+-include(GLFW/GLFW.cmake)
+-include(OpenCSG/OpenCSG.cmake)
++if (NOT ORCA_HEADLESS_DEPS)
++    include(GLEW/GLEW.cmake)
++
++    include(GLFW/GLFW.cmake)
++    include(OpenCSG/OpenCSG.cmake)
++endif ()
+ 
+ include(TBB/TBB.cmake)
+ 
+-include(Blosc/Blosc.cmake)
+-include(OpenEXR/OpenEXR.cmake)
+-include(OpenVDB/OpenVDB.cmake)
++if (NOT ORCA_HEADLESS_DEPS)
++    include(Blosc/Blosc.cmake)
++    include(OpenEXR/OpenEXR.cmake)
++    include(OpenVDB/OpenVDB.cmake)
++endif ()
+ 
+ include(GMP/GMP.cmake)
+ include(MPFR/MPFR.cmake)
+@@ -374,7 +384,7 @@ endif()
+ # so, just don't even bother
+ # ...i think this is how it works? change if wrong
+ set(CURL_PKG "")
+-if (NOT OPENSSL_FOUND OR NOT CURL_FOUND)
++if (NOT ORCA_HEADLESS_DEPS AND (NOT OPENSSL_FOUND OR NOT CURL_FOUND))
+     include(CURL/CURL.cmake)
+     set(CURL_PKG dep_CURL)
+ endif ()
+@@ -387,13 +397,16 @@ endif()
+ 
+ # flatpak builds wxwidgets separately, so it is not included in the deps target
+ set(WXWIDGETS_PKG "")
+-include(wxWidgets/wxWidgets.cmake)
+-if (NOT FLATPAK)
+-    set(WXWIDGETS_PKG "dep_wxWidgets")
+-endif()
++if (NOT ORCA_HEADLESS_DEPS)
++    include(wxWidgets/wxWidgets.cmake)
++    if (NOT FLATPAK)
++        set(WXWIDGETS_PKG "dep_wxWidgets")
++    endif()
++endif ()
+ 
++# FREETYPE is only reachable through OCCT's text support.
+ set(FREETYPE_PKG "")
+-if(NOT FREETYPE_FOUND)
++if(NOT ORCA_HEADLESS_DEPS AND NOT FREETYPE_FOUND)
+     include(FREETYPE/FREETYPE.cmake)
+     set(FREETYPE_PKG "dep_FREETYPE")
+ endif()
+@@ -412,8 +425,18 @@ if((REV_PARSE_RESULT EQUAL 0) AND (REV_PARSE_OUTPUT STREQUAL "true"))
+     file(RELATIVE_PATH BINARY_DIR_REL  ${CMAKE_SOURCE_DIR}/.. ${CMAKE_BINARY_DIR})
+ endif ()
+ 
+-include(OCCT/OCCT.cmake)
+-include(OpenCV/OpenCV.cmake)
++set(GUI_DEP_LIST "")
++if (NOT ORCA_HEADLESS_DEPS)
++    include(OCCT/OCCT.cmake)
++    include(OpenCV/OpenCV.cmake)
++    set(GUI_DEP_LIST
++        dep_OpenVDB
++        dep_OpenCSG
++        dep_OpenCV
++        dep_GLFW
++        dep_OCCT
++        )
++endif ()
+ 
+ set(_dep_list
+     dep_Boost
+@@ -424,13 +447,9 @@ set(_dep_list
+     dep_Cereal
+     dep_Draco
+     dep_NLopt
+-    dep_OpenVDB
+-    dep_OpenCSG
+-    dep_OpenCV
++    ${GUI_DEP_LIST}
+     dep_Eigen
+     dep_CGAL
+-    dep_GLFW
+-    dep_OCCT
+     ${FREETYPE_PKG}
+     ${PNG_PKG}
+     ${ZLIB_PKG}

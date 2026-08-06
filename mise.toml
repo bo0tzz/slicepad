@@ -1,0 +1,30 @@
+[tools]
+# CMake stays on 3.x: OrcaSlicer's bundled deps_src still declare
+# cmake_minimum_required(VERSION 3.5), which 4.x accepts only grudgingly and
+# will drop. Revisit when upstream raises its floor.
+cmake = "3.31.12"
+ninja = "1.13.2"
+
+[env]
+ORCA_DIR = "{{config_root}}/third_party/orcaslicer"
+# Where the superbuild installs. The path is upstream's convention, not ours —
+# deps/CMakeLists.txt derives it and appends usr/local itself.
+DEPS_PREFIX = "{{config_root}}/third_party/orcaslicer/deps/build/OrcaSlicer_dep/usr/local"
+
+[tasks.fetch]
+description = "Fetch the pinned OrcaSlicer source and apply patches/"
+run = "./scripts/fetch-orca.sh"
+sources = ["scripts/fetch-orca.sh", "patches/*.patch"]
+outputs = ["third_party/orcaslicer/.slicepad-stamp"]
+
+[tasks.deps]
+description = "Build the headless dependency set (long; ~14 external projects)"
+depends = ["fetch"]
+# -j1 at the top level is upstream's choice: each external project already
+# parallelises internally, and stacking both exhausts memory.
+run = [
+    "cmake -S $ORCA_DIR/deps -B $ORCA_DIR/deps/build -G Ninja -DORCA_HEADLESS_DEPS=ON -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build $ORCA_DIR/deps/build -j1",
+]
+sources = ["patches/*.patch"]
+outputs = ["third_party/orcaslicer/deps/build/OrcaSlicer_dep/usr/local/lib/libtbb.so*"]
