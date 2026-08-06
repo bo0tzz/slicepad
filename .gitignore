@@ -4,3 +4,6 @@ deps/prefix/
 *.gcode
 *.ipa
 .DS_Store
+
+# The reference G-code is a committed fixture, not build output.
+!testdata/*.gcode
