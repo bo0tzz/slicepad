@@ -31,6 +31,12 @@ find_library(SLICEPAD_TBBMALLOC NAMES tbbmalloc REQUIRED)
 target_link_libraries(libslic3r_cgal PRIVATE ${SLICEPAD_TBBMALLOC})
 
 add_library(slicepad_core STATIC core/src/slicepad.cpp core/src/thumbnail.cpp)
+# Stated explicitly rather than inherited: Orca sets a standard for its own
+# targets, and ours are not among them. GCC on Linux defaults to C++17 so this
+# went unnoticed, while Apple's clang driver defaults to gnu++98 and every use of
+# std::optional, std::filesystem or structured bindings fails. PUBLIC so the CLI
+# and the gates get it too.
+target_compile_features(slicepad_core PUBLIC cxx_std_17)
 target_include_directories(slicepad_core PUBLIC core/include)
 # libslic3r exports its generated-header dir publicly but keeps its source dir
 # private; Orca's own consumers pick up src/ from a directory-scoped
