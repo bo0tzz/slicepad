@@ -67,8 +67,18 @@ sp_result sp_load_config(sp_engine *engine, const char *path);
  * profiles, and doing so is normal. */
 const char *sp_config_source_version(const sp_engine *engine);
 
+/* Number of mesh defects libslic3r repaired while loading the model. Non-zero
+ * means the mesh was not watertight and has been patched up, which is worth
+ * surfacing before someone prints it. */
+int sp_model_repaired_errors(const sp_engine *engine);
+
 /* Replaces any previously loaded model. Accepts .stl, .3mf, and .obj — note
- * that STEP is deliberately not built, so OCCT is absent. */
+ * that STEP is deliberately not built, so OCCT is absent.
+ *
+ * Loading also places the object the way desktop Orca does: dropped onto the
+ * bed, and centred if it is a bare mesh export rather than a saved project,
+ * which keeps its own placement. CAD exports otherwise arrive at the origin
+ * with negative coordinates. */
 sp_result sp_load_model(sp_engine *engine, const char *path);
 int sp_object_count(const sp_engine *engine);
 

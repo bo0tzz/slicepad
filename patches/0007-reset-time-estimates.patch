@@ -1,0 +1,33 @@
+# Actually reset the print time estimates.
+#
+# PrintEstimatedStatistics::reset() iterated modes by value, so it reset a copy
+# of each Mode and left the array untouched. Mode::time and prepare_time have no
+# initialisers either, so reading them is undefined: the estimate is whatever
+# was in memory. Symptoms are intermittent — one model reports a plausible time
+# while another writes 'estimated printing time (normal mode) = -2147483648s'
+# into the G-code from identical toolpaths.
+
+diff --git a/src/libslic3r/GCode/GCodeProcessor.hpp b/src/libslic3r/GCode/GCodeProcessor.hpp
+index 1d2e0890..f799b398 100644
+--- a/src/libslic3r/GCode/GCodeProcessor.hpp
++++ b/src/libslic3r/GCode/GCodeProcessor.hpp
+@@ -54,8 +54,8 @@ class Print;
+ 
+         struct Mode
+         {
+-            float time;
+-            float prepare_time;
++            float time{ 0.0f };
++            float prepare_time{ 0.0f };
+             std::vector<std::pair<CustomGCode::Type, std::pair<float, float>>> custom_gcode_times;
+ 
+             void reset() {
+@@ -89,7 +89,7 @@ class Print;
+         PrintEstimatedStatistics() { reset(); }
+ 
+         void reset() {
+-            for (auto m : modes) {
++            for (auto &m : modes) {
+                 m.reset();
+             }
+             volumes_per_color_change.clear();

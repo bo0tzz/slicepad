@@ -36,11 +36,14 @@ struct sp_engine {
     std::vector<float> toolpath;   // packed x1,y1,z1,x2,y2,z2 per segment
     std::vector<float> mesh;       // packed 9 floats per triangle, bed coords
     std::vector<float> bed;        // packed x,y per printable-area point
+    int repaired_errors = 0;
     bool config_loaded = false;
     bool model_loaded = false;
 };
 
 namespace {
+
+bool extract_project_config(const std::string &path, std::string &out);
 
 // libslic3r signals failure by throwing, and an exception crossing the C ABI is
 // undefined behaviour, so every entry point funnels through here.
@@ -93,6 +96,44 @@ bool extract_project_config(const std::string &path, std::string &out)
 // The loaded model's triangles in bed coordinates. Object and instance
 // transforms are baked in so a view can draw the buffer without knowing
 // anything about the scene graph.
+// The GUI blocks slicing when an object leaves the build volume, but it does so
+// in the GL canvas (check_volumes_outside_state), which a headless build cannot
+// reuse. libslic3r's own Print::validate does not cover it, so without this the
+// engine emits G-code with coordinates outside the bed.
+std::string outside_build_volume(const Model &model, const std::vector<float> &bed,
+                                 double printable_height)
+{
+    if (bed.size() < 4)
+        return {};
+    float lo_x = bed[0], hi_x = bed[0], lo_y = bed[1], hi_y = bed[1];
+    for (size_t i = 0; i + 1 < bed.size(); i += 2) {
+        lo_x = std::min(lo_x, bed[i]);   hi_x = std::max(hi_x, bed[i]);
+        lo_y = std::min(lo_y, bed[i + 1]); hi_y = std::max(hi_y, bed[i + 1]);
+    }
+
+    for (const ModelObject *object : model.objects) {
+        if (object->instances.empty())
+            continue;
+        const BoundingBoxf3 box = object->instance_bounding_box(0);
+        const double slack = 0.001; // ignore floating-point dust at the edges
+        if (box.min.x() < lo_x - slack || box.max.x() > hi_x + slack ||
+            box.min.y() < lo_y - slack || box.max.y() > hi_y + slack ||
+            (printable_height > 0.0 && box.max.z() > printable_height + slack)) {
+            char detail[256];
+            std::snprintf(detail, sizeof(detail),
+                          "%s is outside the printable area: it spans x %.1f..%.1f, "
+                          "y %.1f..%.1f, z up to %.1f, but the bed is x %.1f..%.1f, "
+                          "y %.1f..%.1f with %.0fmm of height",
+                          object->name.empty() ? "the model" : object->name.c_str(),
+                          box.min.x(), box.max.x(), box.min.y(), box.max.y(), box.max.z(),
+                          double(lo_x), double(hi_x), double(lo_y), double(hi_y),
+                          printable_height);
+            return detail;
+        }
+    }
+    return {};
+}
+
 std::vector<float> extract_mesh(const Model &model)
 {
     std::vector<float> vertices;
@@ -327,6 +368,35 @@ sp_result sp_load_model(sp_engine *engine, const char *path)
         engine->model = Model::read_from_file(path, nullptr, nullptr,
                                               LoadStrategy::AddDefaultInstances |
                                                   LoadStrategy::LoadModel);
+
+        // Placement is the GUI's job upstream, so a headless consumer inherits
+        // it: Plater drops every loaded object onto the bed, and centres raw
+        // imports while leaving a project's own placement alone. Without this a
+        // CAD export arrives at the origin — often with negative coordinates —
+        // and slices into G-code that drives the toolhead off the bed.
+        std::string project_config;
+        const bool is_project = extract_project_config(path, project_config);
+        for (ModelObject *object : engine->model.objects)
+            if (!object->instances.empty())
+                object->ensure_on_bed(is_project);
+
+        // Orca's Plater also centres bare mesh imports here, and deliberately not
+        // done yet: doing so makes libslic3r emit INT64_MIN coordinates for this
+        // model, i.e. G-code that would drive the toolhead off the bed. Dropping
+        // alone is clean, and centring alone or after dropping is not — the
+        // manifestation shifts with unrelated changes, so something upstream is
+        // reading uninitialised state that ensure_on_bed happens to normalise.
+        //
+        // Until that is understood, an unplaced import is refused by the build
+        // volume check below rather than silently mis-sliced. Real placement
+        // belongs with libslic3r's own arrange and an orientation control anyway:
+        // a CAD export is rarely in a printable orientation, and sp_set_transform
+        // only rotates about Z.
+
+        engine->repaired_errors = 0;
+        for (const ModelObject *object : engine->model.objects)
+            engine->repaired_errors += object->get_repaired_errors_count();
+
         engine->model_loaded = true;
         engine->mesh = extract_mesh(engine->model);
         return SP_OK;
@@ -448,6 +518,14 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
 
         const DynamicPrintConfig config = effective_config(engine);
 
+        if (const std::string problem = outside_build_volume(
+                engine->model, engine->bed,
+                config.opt_float("printable_height"));
+            !problem.empty()) {
+            engine->last_error = problem;
+            return SP_ERR_SLICE;
+        }
+
         Print print;
         print.apply(engine->model, config);
 
@@ -506,6 +584,11 @@ const char *sp_resolved_config_text(sp_engine *engine)
         engine->config_text.clear();
     }
     return engine->config_text.c_str();
+}
+
+int sp_model_repaired_errors(const sp_engine *engine)
+{
+    return engine ? engine->repaired_errors : 0;
 }
 
 size_t sp_mesh_triangle_count(const sp_engine *engine)
