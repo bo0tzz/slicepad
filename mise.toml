@@ -40,4 +40,4 @@ run = [
     "./scripts/heavy.sh cmake --build $DEPS_BUILD -j1",
 ]
 sources = ["patches/*.patch"]
-outputs = ["build/deps-prefix/usr/local/lib/libtbb.so*"]
+outputs = ["build/deps-prefix/usr/local/lib/libtbb.a"]
