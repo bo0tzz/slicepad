@@ -42,25 +42,3 @@ run = [
 ]
 sources = ["patches/*.patch"]
 outputs = ["build/deps-prefix/usr/local/lib/libtbb.a"]
-
-[tasks.engine]
-description = "Build headless libslic3r"
-depends = ["deps"]
-run = [
-    """cmake -S $ORCA_DIR -B $ORCA_BUILD -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH=$DEPS_PREFIX \
-        -DSLIC3R_STATIC=ON \
-        -DSLIC3R_GUI=OFF \
-        -DSLIC3R_WITH_OCCT=OFF \
-        -DSLIC3R_WITH_OPENCV=OFF \
-        -DSLIC3R_WITH_OPENVDB=OFF""",
-    # Explicit --parallel: the default is one job per core, which exhausts the
-    # memory budget. libslic3r's heaviest translation units (CGAL, Arachne) hold
-    # around 2GB of compiler resident set each and take minutes, so parallelism
-    # here is bound by HEAVY_MEM_HIGH rather than by core count. BUILD_JOBS
-    # overrides — raise it on a machine with real memory headroom.
-    "./scripts/heavy.sh cmake --build $ORCA_BUILD --target libslic3r --parallel ${BUILD_JOBS:-3}",
-]
-sources = ["patches/*.patch"]
-outputs = ["build/orca/src/libslic3r/liblibslic3r.a"]

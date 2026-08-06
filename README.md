@@ -72,6 +72,19 @@ Because the device is out of the loop until install time, anything that can be
 asserted headlessly must be — the simulator tests are the only thing standing
 between a bad commit and a ten-minute round trip.
 
+`tests/gate.cpp` is that assertion: it compares the resolved configuration, every
+G-code command and the reported statistics against a reference sliced by desktop
+Orca, and it is plain C++ over the C ABI so the same source runs wherever the
+engine builds.
+
+Building the whole thing with clang as well as gcc found two real portability
+defects (see `patches/0006` and the `nanosvg`/`tbbmalloc` notes in
+`CMakeLists.txt`) and produced **byte-identical G-code**, so the output does not
+depend on the compiler. Worth knowing if a build ever disagrees: suspect the
+build, not the engine. Reproduce it by pointing `CMAKE_PREFIX_PATH` at a
+clang-built dependency prefix — a clang consumer of gcc-built dependencies fails
+to link, which is a toolchain-mixing artefact rather than a defect.
+
 ## Licence
 
 OrcaSlicer is AGPL-3.0, so this is too. Note that this rules out App Store
