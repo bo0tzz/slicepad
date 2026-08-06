@@ -1,0 +1,2 @@
+# The reference G-code is compared byte for byte; never normalise line endings.
+testdata/reference.gcode -text
