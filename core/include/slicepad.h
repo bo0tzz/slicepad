@@ -41,10 +41,11 @@ typedef enum {
  * valid for the duration of the call. */
 typedef int (*sp_progress_fn)(int percent, const char *stage, void *user);
 
-/* `system_profiles_dir` holds the trimmed copy of OrcaSlicer's
- * resources/profiles tree that ships in the app bundle. It is the search path
- * for resolving `inherits` chains in user-supplied presets. */
-sp_engine *sp_engine_create(const char *system_profiles_dir);
+/* `resources_dir` is the OrcaSlicer resources tree shipped in the app bundle —
+ * the directory containing profiles/, which is what `inherits` chains resolve
+ * against. `data_dir` must be writable: the preset machinery stores imported
+ * user presets there, so on iOS it belongs under Application Support. */
+sp_engine *sp_engine_create(const char *resources_dir, const char *data_dir);
 void sp_engine_destroy(sp_engine *engine);
 
 /* Human-readable detail for the most recent non-SP_OK return. Valid until the
@@ -96,6 +97,13 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
 /* JSON: estimated print time, filament length and weight per extruder, layer
  * count, object bounding box. Valid until the next sp_slice. */
 const char *sp_slice_stats_json(const sp_engine *engine);
+
+/* The fully merged configuration the next slice would use — selected presets
+ * with `inherits` resolved, plus any overrides — as "key = value" lines sorted
+ * by key. That is deliberately the same shape Orca embeds in its own G-code, so
+ * the two can be diffed directly to test profile resolution without slicing
+ * anything. Valid until the next call on this engine. */
+const char *sp_resolved_config_text(sp_engine *engine);
 
 /* Version of the embedded engine, e.g. "2.4.2". Profiles are only guaranteed
  * to round-trip against the desktop Orca that produced them at this version. */
