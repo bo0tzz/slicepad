@@ -99,6 +99,12 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "error: overrides: %s\n", sp_last_error(engine));
         status = 1;
     } else if (opt.command == "config") {
+        const std::string profile_version = sp_config_source_version(engine);
+        std::fprintf(stderr, "engine %s (config %s), profile config %s%s\n",
+                     sp_engine_version(), sp_engine_config_version(),
+                     profile_version.empty() ? "unknown" : profile_version.c_str(),
+                     (!profile_version.empty() && profile_version != sp_engine_config_version())
+                         ? " — migrated" : "");
         std::fputs(sp_resolved_config_text(engine), stdout);
     } else if (opt.command == "slice") {
         if (opt.model.empty() || opt.output.empty()) {

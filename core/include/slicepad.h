@@ -60,9 +60,11 @@ const char *sp_last_error(const sp_engine *engine);
  * changes and reused for every model afterwards. */
 sp_result sp_load_config(sp_engine *engine, const char *path);
 
-/* The engine version the profile was written by, if the project records one.
- * Returns an empty string when absent. A profile from a different OrcaSlicer
- * version than sp_engine_version() may not slice identically. */
+/* The config schema version the profile was written against, e.g. "02.06.00.51",
+ * or an empty string if the project does not record one. Compare against
+ * sp_engine_config_version(): equal versions mean no migration was needed. A
+ * mismatch is a caution rather than an error — libslic3r migrates older
+ * profiles, and doing so is normal. */
 const char *sp_config_source_version(const sp_engine *engine);
 
 /* Replaces any previously loaded model. Accepts .stl, .3mf, and .obj — note
@@ -108,9 +110,14 @@ const char *sp_slice_stats_json(const sp_engine *engine);
  * anything. Valid until the next call on this engine. */
 const char *sp_resolved_config_text(sp_engine *engine);
 
-/* Version of the embedded engine, e.g. "2.4.2". Profiles are only guaranteed
- * to round-trip against the desktop Orca that produced them at this version. */
+/* Release version of the embedded engine, e.g. "2.4.2". Profiles are only
+ * guaranteed to round-trip against the desktop Orca that produced them at this
+ * version. */
 const char *sp_engine_version(void);
+
+/* Config schema version of the embedded engine, e.g. "02.06.00.51". This is what
+ * profile versions are comparable against; the release version is not. */
+const char *sp_engine_config_version(void);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -230,9 +230,16 @@ sp_result sp_load_config(sp_engine *engine, const char *path)
 
         engine->config = std::move(config);
         engine->config_loaded = true;
+
+        // Read the version from the raw project JSON rather than the parsed
+        // config: "version" is not a PrintConfigDef key, so load_from_json drops
+        // it and looking it up there always yielded nothing.
         engine->config_version.clear();
-        if (const auto *version = engine->config.opt<ConfigOptionString>("version"))
-            engine->config_version = version->value;
+        try {
+            const auto parsed = nlohmann::json::parse(extracted);
+            engine->config_version = parsed.value("version", std::string());
+        } catch (const std::exception &) {
+        }
         return SP_OK;
     });
 }
@@ -431,6 +438,8 @@ const char *sp_resolved_config_text(sp_engine *engine)
     return engine->config_text.c_str();
 }
 
-const char *sp_engine_version(void) { return SLIC3R_VERSION; }
+const char *sp_engine_version(void) { return SoftFever_VERSION; }
+
+const char *sp_engine_config_version(void) { return SLIC3R_VERSION; }
 
 } // extern "C"
