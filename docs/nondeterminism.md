@@ -32,6 +32,34 @@ whose tiny difference lands either side of a threshold — plausibly in the adap
 cubic octree, since the profile uses `adaptivecubic` and a `grid` pattern behaves
 differently.
 
+## The amplifier, found later
+
+`FillAdaptive.cpp`'s `make_cubes_properties` decides the octree's depth with a
+threshold:
+
+```cpp
+for (double edge_length = line_spacing * 2.;; edge_length *= 2.) {
+    ...
+    if (edge_length > max_cube_edge_length)
+        break;
+}
+```
+
+The number of levels is therefore a step function of
+`max_cube_edge_length / line_spacing`. A difference in the last bits of either
+input flips an entire level of subdivision, which is how a tiny numerical
+difference becomes two discrete outcomes instead of noise. It also explains why
+density matters: `line_spacing` comes from the density, so only some densities sit
+near a boundary — 20% does not, 60% does.
+
+This identifies the amplifier, not the source. What makes the input differ between
+processes is still unknown.
+
+One correction to the investigation above: the claim that object bounds are
+identical is weaker than it sounds, because `sp_object_bounds` returns floats. A
+double-precision difference in the last bits — exactly the size that would flip
+this threshold — would not have shown up.
+
 ## Why it does not invalidate the engine work
 
 The profile's own settings are unaffected. Gates 2, 3 and 6 — byte-identical
