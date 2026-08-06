@@ -67,7 +67,13 @@ jobs:
           # Orca's superbuild defaults the deployment target to macOS 11.3, which
           # current Xcode will not target: every GMP compile probe fails and its
           # configure reports "could not find a working compiler".
-          DEPS_CMAKE_EXTRA: -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+          # CMAKE_OSX_ARCHITECTURES is not optional here: OpenSSL's recipe builds
+          # its Configure target as "darwin64-${CMAKE_OSX_ARCHITECTURES}-cc", so
+          # leaving it unset asks OpenSSL for "darwin64--cc" and it rejects the
+          # target. It also feeds the superbuild's cross-compile detection.
+          DEPS_CMAKE_EXTRA: >-
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+            -DCMAKE_OSX_ARCHITECTURES=arm64
 
       # autotools dependencies explain themselves in config.log and nowhere else.
       # The whole file, because the failing compile probes are in the middle of it
