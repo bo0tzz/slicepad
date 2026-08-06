@@ -34,6 +34,8 @@ struct sp_engine {
     std::string stats_json = "{}";
     std::string config_text;
     std::vector<float> toolpath;   // packed x1,y1,z1,x2,y2,z2 per segment
+    std::vector<float> mesh;       // packed 9 floats per triangle, bed coords
+    std::vector<float> bed;        // packed x,y per printable-area point
     bool config_loaded = false;
     bool model_loaded = false;
 };
@@ -88,6 +90,48 @@ bool extract_project_config(const std::string &path, std::string &out)
 // The extruding moves as line segments, which is all a stacked-layer view needs.
 // A segment runs from the previous move's position to this one, so only moves
 // that actually deposit material contribute.
+// The loaded model's triangles in bed coordinates. Object and instance
+// transforms are baked in so a view can draw the buffer without knowing
+// anything about the scene graph.
+std::vector<float> extract_mesh(const Model &model)
+{
+    std::vector<float> vertices;
+    for (const ModelObject *object : model.objects) {
+        if (object->instances.empty())
+            continue;
+        const Transform3d instance_matrix = object->instances.front()->get_matrix();
+        for (const ModelVolume *volume : object->volumes) {
+            if (!volume->is_model_part())
+                continue;
+            const Transform3d matrix = instance_matrix * volume->get_matrix();
+            const indexed_triangle_set &its = volume->mesh().its;
+            vertices.reserve(vertices.size() + its.indices.size() * 9);
+            for (const Vec3i32 &face : its.indices) {
+                for (int corner = 0; corner < 3; ++corner) {
+                    const Vec3d point =
+                        matrix * its.vertices[size_t(face[corner])].cast<double>();
+                    vertices.push_back(float(point.x()));
+                    vertices.push_back(float(point.y()));
+                    vertices.push_back(float(point.z()));
+                }
+            }
+        }
+    }
+    return vertices;
+}
+
+std::vector<float> extract_bed(const DynamicPrintConfig &config)
+{
+    std::vector<float> points;
+    if (const auto *area = config.opt<ConfigOptionPoints>("printable_area")) {
+        for (const Vec2d &point : area->values) {
+            points.push_back(float(point.x()));
+            points.push_back(float(point.y()));
+        }
+    }
+    return points;
+}
+
 std::vector<float> extract_toolpath(const GCodeProcessorResult &result)
 {
     std::vector<float> segments;
@@ -252,6 +296,7 @@ sp_result sp_load_config(sp_engine *engine, const char *path)
 
         engine->config = std::move(config);
         engine->config_loaded = true;
+        engine->bed = extract_bed(engine->config);
 
         // Read the version from the raw project JSON rather than the parsed
         // config: "version" is not a PrintConfigDef key, so load_from_json drops
@@ -283,6 +328,7 @@ sp_result sp_load_model(sp_engine *engine, const char *path)
                                               LoadStrategy::AddDefaultInstances |
                                                   LoadStrategy::LoadModel);
         engine->model_loaded = true;
+        engine->mesh = extract_mesh(engine->model);
         return SP_OK;
     });
 }
@@ -311,6 +357,7 @@ sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
         instance->set_rotation(Z, rotate_z_deg * M_PI / 180.0);
         instance->set_offset(Vec3d(translate_x, translate_y, instance->get_offset().z()));
         object->invalidate_bounding_box();
+        engine->mesh = extract_mesh(engine->model); // transforms are baked in
         return SP_OK;
     });
 }
@@ -459,6 +506,48 @@ const char *sp_resolved_config_text(sp_engine *engine)
         engine->config_text.clear();
     }
     return engine->config_text.c_str();
+}
+
+size_t sp_mesh_triangle_count(const sp_engine *engine)
+{
+    return engine ? engine->mesh.size() / 9 : 0;
+}
+
+const float *sp_mesh_vertices(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->mesh.empty()) ? engine->mesh.data() : nullptr;
+}
+
+size_t sp_bed_point_count(const sp_engine *engine)
+{
+    return engine ? engine->bed.size() / 2 : 0;
+}
+
+const float *sp_bed_points(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->bed.empty()) ? engine->bed.data() : nullptr;
+}
+
+sp_result sp_object_bounds(sp_engine *engine, int object_index, float *out_min_max)
+{
+    return guard(engine, [&]() -> sp_result {
+        if (out_min_max == nullptr)
+            return SP_ERR_STATE;
+        if (!engine->model_loaded || object_index < 0 ||
+            size_t(object_index) >= engine->model.objects.size()) {
+            engine->last_error = "no such object";
+            return SP_ERR_STATE;
+        }
+        const BoundingBoxf3 box =
+            engine->model.objects[size_t(object_index)]->instance_bounding_box(0);
+        out_min_max[0] = float(box.min.x());
+        out_min_max[1] = float(box.min.y());
+        out_min_max[2] = float(box.min.z());
+        out_min_max[3] = float(box.max.x());
+        out_min_max[4] = float(box.max.y());
+        out_min_max[5] = float(box.max.z());
+        return SP_OK;
+    });
 }
 
 size_t sp_toolpath_segment_count(const sp_engine *engine)

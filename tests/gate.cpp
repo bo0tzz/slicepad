@@ -305,6 +305,50 @@ int main(int argc, char **argv)
             else
                 std::printf("gate4 toolpath: %zu segments, top %.2fmm matches the desktop\n",
                             segments, double(top));
+
+            // Gate 5: the geometry a plate view draws. Checked by cross-referencing
+            // two independent paths — the mesh buffer against the reported object
+            // bounds, and the mesh height against what the slice actually printed —
+            // so a transform applied in one place but not the other shows up.
+            const size_t triangles = sp_mesh_triangle_count(engine);
+            const float *mesh = sp_mesh_vertices(engine);
+            float bounds[6] = {0};
+            if (triangles == 0 || mesh == nullptr) {
+                failures += fail("gate5", "no mesh triangles exposed");
+            } else if (sp_object_bounds(engine, 0, bounds) != SP_OK) {
+                failures += fail("gate5", std::string("object bounds: ") + sp_last_error(engine));
+            } else {
+                float lo[3] = {mesh[0], mesh[1], mesh[2]};
+                float hi[3] = {mesh[0], mesh[1], mesh[2]};
+                for (size_t i = 0; i < triangles * 9; i += 3)
+                    for (int axis = 0; axis < 3; ++axis) {
+                        lo[axis] = std::min(lo[axis], mesh[i + axis]);
+                        hi[axis] = std::max(hi[axis], mesh[i + axis]);
+                    }
+
+                for (int axis = 0; axis < 3; ++axis) {
+                    if (std::fabs(lo[axis] - bounds[axis]) > 0.05 ||
+                        std::fabs(hi[axis] - bounds[axis + 3]) > 0.05) {
+                        failures += fail("gate5", "mesh buffer and reported bounds disagree on axis " +
+                                                      std::to_string(axis));
+                        break;
+                    }
+                }
+                // The printed top should land within a layer of the model's height.
+                if (std::fabs(hi[2] - top) > 0.5f)
+                    failures += fail("gate5", "model is " + std::to_string(hi[2]) +
+                                                  "mm tall but the slice printed to " +
+                                                  std::to_string(top));
+
+                const size_t bed_points = sp_bed_point_count(engine);
+                if (bed_points < 3)
+                    failures += fail("gate5", "printable area has too few points");
+                else
+                    std::printf("gate5 geometry: %zu triangles, %zu bed points, "
+                                "model %.1fx%.1fx%.1fmm consistent with the slice\n",
+                                triangles, bed_points, double(hi[0] - lo[0]),
+                                double(hi[1] - lo[1]), double(hi[2] - lo[2]));
+            }
         }
     }
 

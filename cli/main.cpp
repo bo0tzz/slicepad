@@ -120,8 +120,14 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "\nwrote %s\n", opt.output.c_str());
             std::fputs(sp_slice_stats_json(engine), stdout);
             std::fputc('\n', stdout);
-            std::fprintf(stderr, "toolpath: %zu segments\n",
-                         sp_toolpath_segment_count(engine));
+            float bounds[6] = {0};
+            sp_object_bounds(engine, 0, bounds);
+            std::fprintf(stderr,
+                         "toolpath: %zu segments | mesh: %zu triangles | bed: %zu points\n"
+                         "bounds: x %.1f..%.1f  y %.1f..%.1f  z %.1f..%.1f\n",
+                         sp_toolpath_segment_count(engine), sp_mesh_triangle_count(engine),
+                         sp_bed_point_count(engine), bounds[0], bounds[3], bounds[1],
+                         bounds[4], bounds[2], bounds[5]);
         }
     } else {
         std::fprintf(stderr, "error: unknown command %s\n", opt.command.c_str());

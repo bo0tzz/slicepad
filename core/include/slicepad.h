@@ -103,6 +103,22 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
  * count, object bounding box. Valid until the next sp_slice. */
 const char *sp_slice_stats_json(const sp_engine *engine);
 
+/* Geometry a plate view needs. Together these answer the question the view
+ * exists for: is the model the size I meant, and is it on the bed?
+ *
+ * sp_mesh_* gives the loaded model's triangles in bed millimetres with object
+ * and instance transforms already applied — nine floats per triangle, ready for
+ * a vertex buffer. sp_bed_* gives the printable area outline from the profile,
+ * as x,y pairs. Both are owned by the engine: the mesh is valid until the next
+ * sp_load_model or sp_set_transform, the bed until the next sp_load_config.
+ *
+ * sp_object_bounds writes min then max as six floats (x,y,z,x,y,z). */
+size_t sp_mesh_triangle_count(const sp_engine *engine);
+const float *sp_mesh_vertices(const sp_engine *engine);
+size_t sp_bed_point_count(const sp_engine *engine);
+const float *sp_bed_points(const sp_engine *engine);
+sp_result sp_object_bounds(sp_engine *engine, int object_index, float *out_min_max);
+
 /* Extruding moves from the last slice, as packed line segments: six floats per
  * segment, (x1,y1,z1,x2,y2,z2) in bed millimetres. Travel, wipe and retract
  * moves are excluded, so drawing every segment as a line gives the stacked-layer
