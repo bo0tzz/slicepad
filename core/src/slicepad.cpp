@@ -12,12 +12,15 @@
 #include <libslic3r/GCode/GCodeProcessor.hpp>
 
 #include <boost/filesystem.hpp>
+#include <boost/log/trivial.hpp>
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -33,6 +36,9 @@ struct sp_engine {
     std::string last_error;
     std::string stats_json;
     std::string config_text;
+    std::string sel_printer;
+    std::string sel_process;
+    std::string sel_filament;
     bool model_loaded = false;
 };
 
@@ -129,6 +135,29 @@ std::string printer_model_in_bundle(const std::string &path)
     return model;
 }
 
+// Imported user presets are namespaced "_local/<uuid>/<name>", so a caller that
+// knows a preset as "Sovol SV08 0.4 nozzle" has to be able to find it by the
+// trailing component. A user preset may also deliberately shadow a system one of
+// the same name, in which case the user's is what the operator meant.
+const Preset *find_preset(const PresetCollection &collection, const std::string &name)
+{
+    auto basename = [](const std::string &full) {
+        const size_t slash = full.rfind('/');
+        return slash == std::string::npos ? full : full.substr(slash + 1);
+    };
+
+    const Preset *system_match = nullptr;
+    for (const Preset &preset : collection) {
+        if (preset.name != name && basename(preset.name) != name)
+            continue;
+        if (!preset.is_system)
+            return &preset;
+        system_match = &preset;
+    }
+    return system_match;
+}
+
+
 PresetCollection *collection_for(sp_engine *engine, sp_preset_kind kind)
 {
     switch (kind) {
@@ -157,6 +186,41 @@ template <typename Fn> sp_result guard(sp_engine *engine, Fn &&fn)
     }
 }
 
+
+// Merges the selected presets exactly as the GUI's calibration code does, via
+// the public static entry point, so no preset selection state is involved.
+bool build_config(sp_engine *engine, DynamicPrintConfig &out)
+{
+    auto pick = [&](sp_preset_kind kind, const std::string &wanted,
+                    const char *label) -> const Preset * {
+        PresetCollection *collection = collection_for(engine, kind);
+        if (collection == nullptr)
+            return nullptr;
+        const Preset *preset = wanted.empty() ? nullptr : find_preset(*collection, wanted);
+        if (preset == nullptr)
+            engine->last_error = std::string("no ") + label + " preset selected";
+        return preset;
+    };
+
+    const Preset *printer = pick(SP_PRESET_MACHINE, engine->sel_printer, "printer");
+    const Preset *process = pick(SP_PRESET_PROCESS, engine->sel_process, "process");
+    const Preset *filament = pick(SP_PRESET_FILAMENT, engine->sel_filament, "filament");
+    if (printer == nullptr || process == nullptr || filament == nullptr)
+        return false;
+
+    // construct_full_config takes mutable references and may normalise as it
+    // merges, so hand it copies rather than the collection's presets.
+    Preset printer_copy = *printer;
+    Preset process_copy = *process;
+    std::vector<Preset> filament_copies{*filament};
+
+    out = PresetBundle::construct_full_config(printer_copy, process_copy,
+                                             engine->presets.project_config,
+                                             filament_copies, true, std::nullopt);
+    out.apply(engine->overrides, true);
+    return true;
+}
+
 } // namespace
 
 extern "C" {
@@ -168,7 +232,10 @@ sp_engine *sp_engine_create(const char *resources_dir, const char *data_dir)
     try {
         auto engine = std::make_unique<sp_engine>();
         engine->resources_dir = resources_dir;
-        set_logging_level(0);
+        // Quiet by default: libslic3r's boost::log writes to stdout, which would
+        // corrupt the config dump. SLICEPAD_LOG raises it for debugging.
+        const char *log_level = std::getenv("SLICEPAD_LOG");
+        set_logging_level(log_level ? unsigned(std::atoi(log_level)) : 0);
         set_resources_dir(resources_dir);
         set_data_dir(data_dir);
         engine->presets.setup_directories();
@@ -219,8 +286,10 @@ sp_result sp_load_presets(sp_engine *engine, const char *path)
             engine->last_error = "failed to install vendor " + vendor;
             return SP_ERR_UNRESOLVED;
         }
-        engine->presets.load_presets(engine->app_config,
-                                     ForwardCompatibilitySubstitutionRule::EnableSilent);
+        BOOST_LOG_TRIVIAL(info) << "slicepad: after apply_vendor_config prints="
+                                << engine->presets.prints.size()
+                                << " filaments=" << engine->presets.filaments.size()
+                                << " printers=" << engine->presets.printers.size();
 
         // 3 is yes-to-all for the overwrite prompt, per import_json_presets.
         std::vector<std::string> files{path};
@@ -228,8 +297,10 @@ sp_result sp_load_presets(sp_engine *engine, const char *path)
         engine->presets.import_presets(files, overwrite_all,
                                        ForwardCompatibilitySubstitutionRule::EnableSilent,
                                        engine->app_config);
-        engine->presets.load_presets(engine->app_config,
-                                     ForwardCompatibilitySubstitutionRule::EnableSilent);
+        BOOST_LOG_TRIVIAL(info) << "slicepad: after import prints="
+                                << engine->presets.prints.size()
+                                << " filaments=" << engine->presets.filaments.size()
+                                << " printers=" << engine->presets.printers.size();
         return SP_OK;
     });
 }
@@ -258,9 +329,17 @@ sp_result sp_select_preset(sp_engine *engine, sp_preset_kind kind, const char *n
         auto *collection = collection_for(engine, kind);
         if (collection == nullptr || name == nullptr)
             return SP_ERR_STATE;
-        if (!collection->select_preset_by_name(name, false)) {
+        if (find_preset(*collection, name) == nullptr) {
             engine->last_error = std::string("no such preset: ") + name;
             return SP_ERR_UNRESOLVED;
+        }
+        // Recorded rather than selected in the collection: PresetCollection's
+        // selection is entangled with visibility and compatibility filtering,
+        // which is GUI behaviour we do not want deciding what we slice.
+        switch (kind) {
+        case SP_PRESET_MACHINE:  engine->sel_printer = name; break;
+        case SP_PRESET_PROCESS:  engine->sel_process = name; break;
+        case SP_PRESET_FILAMENT: engine->sel_filament = name; break;
         }
         return SP_OK;
     });
@@ -375,8 +454,9 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         if (out_gcode_path == nullptr)
             return SP_ERR_IO;
 
-        DynamicPrintConfig config = engine->presets.full_config(true);
-        config.apply(engine->overrides, true);
+        DynamicPrintConfig config;
+        if (!build_config(engine, config))
+            return SP_ERR_STATE;
 
         Print print;
         print.apply(engine->model, config);
@@ -418,8 +498,9 @@ const char *sp_resolved_config_text(sp_engine *engine)
         return "";
     engine->config_text.clear();
     try {
-        DynamicPrintConfig config = engine->presets.full_config(true);
-        config.apply(engine->overrides, true);
+        DynamicPrintConfig config;
+        if (!build_config(engine, config))
+            return engine->config_text.c_str();
         // keys() is sorted, which keeps the output diffable.
         for (const std::string &key : config.keys())
             engine->config_text += key + " = " + config.opt_serialize(key) + "\n";
