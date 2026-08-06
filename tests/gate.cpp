@@ -352,6 +352,43 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 6: the actual target workflow, end to end. A raw CAD export — not a
+    // project Orca has already placed — auto-oriented and arranged by us should
+    // reproduce what the desktop produced when a person did the same by hand.
+    // This is the one gate that exercises the path a user actually takes.
+    if (failures == 0) {
+        const std::string raw = fixtures + "/model-shapr3d.3mf";
+        const std::string out = work + "/raw.gcode";
+        if (sp_load_model(engine, raw.c_str()) != SP_OK) {
+            failures += fail("gate6", std::string("loading raw export: ") + sp_last_error(engine));
+        } else if (sp_auto_orient(engine) != SP_OK) {
+            failures += fail("gate6", std::string("auto-orient: ") + sp_last_error(engine));
+        } else if (sp_arrange(engine) != SP_OK) {
+            failures += fail("gate6", std::string("arrange: ") + sp_last_error(engine));
+        } else if (sp_slice(engine, out.c_str(), nullptr, nullptr) != SP_OK) {
+            failures += fail("gate6", std::string("slicing: ") + sp_last_error(engine));
+        } else {
+            const auto expected = commands_of(read_file(reference));
+            const auto produced = commands_of(read_file(out));
+            if (produced.size() != expected.size()) {
+                failures += fail("gate6", "raw export gives " + std::to_string(produced.size()) +
+                                              " commands against the desktop's " +
+                                              std::to_string(expected.size()));
+            } else {
+                size_t first_diff = expected.size();
+                for (size_t i = 0; i < expected.size(); ++i)
+                    if (expected[i] != produced[i]) { first_diff = i; break; }
+                if (first_diff != expected.size())
+                    failures += fail("gate6", "raw export diverges at command " +
+                                                  std::to_string(first_diff));
+                else
+                    std::printf("gate6 workflow: raw CAD export, oriented and arranged, "
+                                "reproduces the desktop exactly (%zu commands)\n",
+                                expected.size());
+            }
+        }
+    }
+
     sp_engine_destroy(engine);
     if (failures == 0)
         std::puts("PASS");

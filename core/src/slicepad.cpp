@@ -3,6 +3,8 @@
 #include <libslic3r/libslic3r.h>
 #include <libslic3r/Config.hpp>
 #include <libslic3r/Model.hpp>
+#include <libslic3r/ModelArrange.hpp>
+#include <libslic3r/Orient.hpp>
 #include <libslic3r/Print.hpp>
 #include <libslic3r/PrintConfig.hpp>
 #include <libslic3r/Utils.hpp>
@@ -439,18 +441,42 @@ sp_result sp_arrange(sp_engine *engine)
             engine->last_error = "no model loaded";
             return SP_ERR_STATE;
         }
-        // Centre on the bed. Real arrangement of multiple objects is not
-        // implemented; the plate editor is where that policy belongs.
-        const DynamicPrintConfig config = effective_config(engine);
-        Vec2d centre(0, 0);
-        if (const auto *area = config.opt<ConfigOptionPoints>("printable_area");
-            area != nullptr && !area->values.empty()) {
-            BoundingBoxf bed;
-            for (const Vec2d &point : area->values)
-                bed.merge(point);
-            centre = bed.center();
+        if (!engine->config_loaded) {
+            engine->last_error = "no profile loaded, so the bed is unknown";
+            return SP_ERR_STATE;
         }
-        engine->model.center_instances_around_point(centre);
+        // libslic3r's own arrange, invoked the way the CLI does, rather than
+        // shifting instances by hand.
+        const Points bed = get_bed_shape(engine->config);
+        arrangement::ArrangeParams params;
+        // Its default progress callback writes to stdout, which would corrupt a
+        // consumer's output. A no-op rather than nullptr: the caller invokes it
+        // unconditionally.
+        params.progressind = [](unsigned, std::string) {};
+        arrange_objects(engine->model, bed, params);
+        for (ModelObject *object : engine->model.objects)
+            if (!object->instances.empty())
+                object->ensure_on_bed();
+        engine->mesh = extract_mesh(engine->model);
+        return SP_OK;
+    });
+}
+
+sp_result sp_auto_orient(sp_engine *engine)
+{
+    return guard(engine, [&]() -> sp_result {
+        if (!engine->model_loaded) {
+            engine->last_error = "no model loaded";
+            return SP_ERR_STATE;
+        }
+        // A CAD export is rarely in a printable orientation. This is the same
+        // algorithm the desktop's auto-orient uses.
+        for (ModelObject *object : engine->model.objects)
+            orientation::orient(object);
+        for (ModelObject *object : engine->model.objects)
+            if (!object->instances.empty())
+                object->ensure_on_bed();
+        engine->mesh = extract_mesh(engine->model);
         return SP_OK;
     });
 }

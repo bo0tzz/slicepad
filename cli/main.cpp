@@ -24,6 +24,8 @@ struct Options {
     std::string model;
     std::string output;
     std::string overrides;
+    bool orient = false;
+    bool arrange = false;
 };
 
 void usage()
@@ -69,6 +71,8 @@ int main(int argc, char **argv)
         if (arg == "-h" || arg == "--help") { usage(); return 0; }
         else if (arg == "-o")          next(opt.output);
         else if (arg == "--overrides") next(opt.overrides);
+        else if (arg == "--orient")    opt.orient = true;
+        else if (arg == "--arrange")   opt.arrange = true;
         else if (opt.command.empty())  opt.command = arg;
         else if (opt.profile.empty())  opt.profile = arg;
         else if (opt.model.empty())    opt.model = arg;
@@ -112,6 +116,12 @@ int main(int argc, char **argv)
             status = 2;
         } else if (sp_load_model(engine, opt.model.c_str()) != SP_OK) {
             std::fprintf(stderr, "error: loading model: %s\n", sp_last_error(engine));
+            status = 1;
+        } else if (opt.orient && sp_auto_orient(engine) != SP_OK) {
+            std::fprintf(stderr, "error: auto-orient: %s\n", sp_last_error(engine));
+            status = 1;
+        } else if (opt.arrange && sp_arrange(engine) != SP_OK) {
+            std::fprintf(stderr, "error: arrange: %s\n", sp_last_error(engine));
             status = 1;
         } else if (sp_slice(engine, opt.output.c_str(), progress_line, nullptr) != SP_OK) {
             std::fprintf(stderr, "\nerror: slicing: %s\n", sp_last_error(engine));

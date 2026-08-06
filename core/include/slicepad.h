@@ -88,8 +88,17 @@ int sp_object_count(const sp_engine *engine);
 sp_result sp_set_transform(sp_engine *engine, int object_index,
                            double scale, double rotate_z_deg,
                            double translate_x, double translate_y);
-/* Drop objects onto the bed and space them out, mirroring Orca's arrange. */
+/* Place objects on the bed using libslic3r's own arrange — the same code the
+ * desktop's arrange button drives. Needs a profile loaded, since the bed comes
+ * from it. A bare CAD export arrives at the origin and will not slice until this
+ * or an explicit transform puts it on the bed. */
 sp_result sp_arrange(sp_engine *engine);
+
+/* Rotate objects into a printable orientation using the desktop's auto-orient
+ * algorithm, then drop them back onto the bed. CAD exports are usually oriented
+ * for modelling rather than printing, and sp_set_transform only rotates about Z,
+ * so this is the only way to stand a part up. */
+sp_result sp_auto_orient(sp_engine *engine);
 
 /* Config overrides layered on top of the loaded profile — the "tweak the
  * basics" path.
