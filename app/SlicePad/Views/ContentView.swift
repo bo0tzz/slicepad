@@ -63,7 +63,6 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(model.modelName == nil)
-                    .onChange(of: model.display) { model.displayChanged() }
                 }
             }
         }

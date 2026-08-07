@@ -18,7 +18,16 @@ final class AppModel: ObservableObject {
     @Published var scale: Double = 100      // percent, as the desktop shows it
     @Published var rotateZ: Double = 0
 
-    @Published var display: Display = .model
+    /// The refresh belongs to the model rather than to whichever view flipped the
+    /// switch. It used to hang off an .onChange attached to a Picker inside a
+    /// ToolbarItem — toolbar content is a separate hierarchy, and a modifier that
+    /// quietly never fires is exactly how the Profile button came to do nothing.
+    @Published var display: Display = .model {
+        didSet {
+            guard oldValue != display else { return }
+            Task { await refreshGeometry() }
+        }
+    }
     @Published var geometry = PlateGeometry()
 
     @Published var isSlicing = false
@@ -216,7 +225,4 @@ final class AppModel: ObservableObject {
         geometry = fresh
     }
 
-    func displayChanged() {
-        Task { await refreshGeometry() }
-    }
 }
