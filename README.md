@@ -120,6 +120,12 @@ There is no Mac in the inner loop, which shapes everything:
 2. **Apple work happens in CI.** A `macos-26` runner exercises Apple's clang, ld64
    and SDK, and runs the same gates. iOS then adds only cross-compilation on top
    of a target already known good.
+3. **App work has its own short loop.** A separate job type checks the SwiftUI
+   sources against the iOS SDK in a couple of minutes, without the engine — it
+   needs only the C ABI's header — and runs `app/Tests/main.swift`, which checks
+   the parsing that type checking cannot: a profile's settings read into the
+   controls, a typed address turned into a URL. Linking is what the iOS job is
+   for; nothing short of a device covers the rest.
 
 `tests/gate.cpp` is the safety net: twelve gates covering config resolution,
 G-code equality, statistics, toolpath and plate geometry, the override controls,
