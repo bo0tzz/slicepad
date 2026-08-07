@@ -1,21 +1,24 @@
 # Cross-compile the autotools dependencies to another Apple platform.
 #
 # GMP derived --build from CMAKE_SYSTEM_PROCESSOR, which describes the target and
-# is empty for iOS, producing a bare "-apple-darwin" triple and a config.sub
-# failure. --build describes the machine doing the building, so it comes from the
-# host processor. iOS also needs -miphoneos-version-min and the iPhoneOS sysroot
-# rather than -mmacosx-version-min.
+# is empty for iOS, producing a bare "-apple-darwin" triple. --build describes
+# the machine doing the building, so it comes from the host processor.
 #
-# MPFR reuses GMP's flags and triple, so it inherits those fixes, but it also
-# passed --host=${TOOLCHAIN_PREFIX} whenever CMAKE_CROSSCOMPILING was set.
-# TOOLCHAIN_PREFIX is a Linux-cross convention and is never defined on Apple, so
-# an iOS build sent configure a bare --host=.
+# The host triple must also differ from the build triple: with both set to
+# aarch64-apple-darwin, autoconf decides the build is native and tries to run its
+# test binaries, which cannot work when targeting iOS and reports itself as
+# "could not find a working compiler". config.sub in gmp-6.2.1 accepts
+# -apple-ios, checked against the pinned tarball.
+#
+# iOS also needs -miphoneos-version-min and the iPhoneOS sysroot, and MPFR — which
+# reuses GMP's flags and triple — must not pass a bare --host= from the Linux
+# cross convention TOOLCHAIN_PREFIX, which is never set on Apple.
 
 diff --git a/deps/GMP/GMP.cmake b/deps/GMP/GMP.cmake
-index b3ba1817..45ba1a26 100644
+index b3ba1817..cab72dc3 100644
 --- a/deps/GMP/GMP.cmake
 +++ b/deps/GMP/GMP.cmake
-@@ -24,20 +24,34 @@ else ()
+@@ -24,21 +24,44 @@ else ()
      set(_gmp_build_tgt "${CMAKE_SYSTEM_PROCESSOR}")
  
      if (APPLE)
@@ -45,6 +48,7 @@ index b3ba1817..45ba1a26 100644
                  set(_gmp_host_arch_flags "-arch x86_64")
              endif()
 -            set(_gmp_ccflags "${_gmp_ccflags} ${_gmp_host_arch_flags} -mmacosx-version-min=${DEP_OSX_TARGET}")
+-            set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-darwin)
 +            if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
 +                # A different platform needs its own minimum-version flag and its
 +                # own sysroot; -mmacosx-version-min is meaningless here.
@@ -52,9 +56,19 @@ index b3ba1817..45ba1a26 100644
 +            else ()
 +                set(_gmp_ccflags "${_gmp_ccflags} ${_gmp_host_arch_flags} -mmacosx-version-min=${DEP_OSX_TARGET}")
 +            endif ()
-             set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-darwin)
++            # The host triple must differ from the build triple or autoconf
++            # decides this is a native build and tries to run its test binaries,
++            # which fails with "could not find a working compiler". config.sub in
++            # gmp-6.2.1 accepts -apple-ios, so the platform makes them differ
++            # honestly rather than by fudging the architecture.
++            if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++                set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-ios)
++            else ()
++                set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-darwin)
++            endif ()
          else ()
              set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
+             set(_gmp_build_tgt "--build=${_gmp_build_arch}-apple-darwin")
 diff --git a/deps/MPFR/MPFR.cmake b/deps/MPFR/MPFR.cmake
 index 755a7699..9df288f4 100644
 --- a/deps/MPFR/MPFR.cmake
