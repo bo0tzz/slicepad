@@ -194,7 +194,9 @@ final class AppModel: ObservableObject {
 
     private func refreshGeometry() async {
         guard let host else { return }
-        geometry = await host.geometry(includeToolpath: display == .layers)
+        var fresh = await host.geometry(includeToolpath: display == .layers)
+        fresh.revision = geometry.revision + 1
+        geometry = fresh
     }
 
     func displayChanged() {

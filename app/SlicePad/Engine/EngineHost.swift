@@ -2,15 +2,17 @@ import Foundation
 
 /// Geometry snapshot for the plate view. Copied out of the engine's buffers, which
 /// are only valid until the next call — so the view never holds engine memory.
-struct PlateGeometry: Equatable {
+struct PlateGeometry {
     var bed: [SIMD2<Float>] = []
     var triangles: [SIMD3<Float>] = []
     var toolpath: [SIMD3<Float>] = []
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)?
 
-    static func == (a: PlateGeometry, b: PlateGeometry) -> Bool {
-        a.bed == b.bed && a.triangles == b.triangles && a.toolpath == b.toolpath
-    }
+    /// Bumped whenever the engine is read again. The view rebuilds on a change of
+    /// this rather than on a change of the arrays: a progress tick redraws the whole
+    /// UI a hundred times during a slice, and comparing a few hundred thousand
+    /// floats to discover nothing moved is its own kind of waste.
+    var revision = 0
 }
 
 /// Serialises access to the engine, which is single-threaded per instance, and

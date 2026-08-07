@@ -29,6 +29,12 @@ struct PlateView: UIViewRepresentable {
 
     func updateUIView(_ view: SCNView, context: Context) {
         guard let root = view.scene?.rootNode.childNode(withName: "root", recursively: false) else { return }
+
+        // SwiftUI re-runs this for any state change at all, progress ticks included.
+        let state = Coordinator.State(revision: geometry.revision, display: display)
+        guard context.coordinator.state != state else { return }
+        context.coordinator.state = state
+
         root.childNodes.forEach { $0.removeFromParentNode() }
 
         if !geometry.bed.isEmpty {
@@ -55,6 +61,12 @@ struct PlateView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
+        struct State: Equatable {
+            let revision: Int
+            let display: AppModel.Display
+        }
+
+        var state: State?
         var hasFramed = false
     }
 
