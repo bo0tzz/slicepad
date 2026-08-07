@@ -23,6 +23,7 @@ fi
 cmake -S "$root" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_SYSTEM_NAME=iOS \
+    -DCMAKE_SYSTEM_PROCESSOR=arm64 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
     -DCMAKE_PREFIX_PATH="$prefix" \

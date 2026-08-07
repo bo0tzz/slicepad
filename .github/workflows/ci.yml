@@ -224,6 +224,7 @@ jobs:
           ORCA_DEPS_NPROC: 4
           DEPS_CMAKE_EXTRA: >-
             -DCMAKE_SYSTEM_NAME=iOS
+            -DCMAKE_SYSTEM_PROCESSOR=arm64
             -DCMAKE_OSX_ARCHITECTURES=arm64
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
 
@@ -250,6 +251,7 @@ jobs:
           cmake -S . -B build/ios -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local" \

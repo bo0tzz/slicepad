@@ -8,10 +8,13 @@
 # It also turns off app bundles: on iOS CMake makes every executable one, and
 # these dependencies install command-line tools with no bundle destination.
 #
+# And CMAKE_SYSTEM_PROCESSOR, empty for an iOS target while third-party recipes
+# read it unguarded — libjpeg-turbo among them.
+#
 diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
 --- a/deps/CMakeLists.txt
 +++ b/deps/CMakeLists.txt
-@@ -149,6 +149,21 @@
+@@ -149,6 +149,29 @@
          set(CMAKE_CXX_COMPILER_ID "Clang")
          string(REPLACE ";" "$<SEMICOLON>" CMAKE_OSX_ARCHS "${CMAKE_OSX_ARCHITECTURES}")
          set(_cmake_osx_arch -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHS})
@@ -28,7 +31,15 @@ diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
 +                # only a runtime destination — Qhull, and the utilities shipped with
 +                # PNG, JPEG and Expat — so each fails to configure with "no BUNDLE
 +                # DESTINATION". Nothing here needs a bundle.
-+                -DCMAKE_MACOSX_BUNDLE:BOOL=OFF)
++                -DCMAKE_MACOSX_BUNDLE:BOOL=OFF
++                # Empty for an iOS target, and third-party recipes read it without
++                # checking: libjpeg-turbo does string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR}
++                # CPU_TYPE), which becomes a one-argument call and fails with "no
++                # output variable specified". Those are dependencies we do not
++                # patch, so it has to arrive populated. Giving it a value does not
++                # make the build look native: the checks above key off the system
++                # name, which still differs.
++                -DCMAKE_SYSTEM_PROCESSOR:STRING=${CMAKE_SYSTEM_PROCESSOR})
 +        endif ()
          set(_cmake_args_osx_arch CMAKE_ARGS -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHS})
          message(STATUS "Detect Cross-compilation. Will build for target ${CMAKE_OSX_ARCHS}" )
