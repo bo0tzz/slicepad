@@ -39,10 +39,17 @@ targets:
         # The engine is C++; without this the Swift target links the C ABI but not
         # the standard library the implementation behind it needs.
         CLANG_CXX_LIBRARY: libc++
-        # libslic3r links Foundation and ModelIO, and frameworks are link flags
-        # rather than archives — merging static libraries cannot carry them, so the
-        # app has to name them itself. Both exist on iOS.
-        OTHER_LDFLAGS: -lc++ -lz -framework Foundation -framework ModelIO
+        # Everything libslic3r resolves from the SDK rather than from our own
+        # dependency prefix. A static archive can only carry object files, so
+        # system libraries and frameworks have to be named again here — the
+        # xcframework merge cannot bring them along.
+        #
+        # This is the full set the engine's configure reported finding in the iOS
+        # sysroot: expat, iconv and zlib as .tbd libraries, Accelerate, plus the
+        # Foundation and ModelIO that libslic3r links explicitly.
+        OTHER_LDFLAGS: >-
+          -lc++ -lz -lexpat -liconv
+          -framework Foundation -framework ModelIO -framework Accelerate
         # Documents come in through the picker, which is why there is no file
         # sharing here: nothing is meant to live inside the app.
         SWIFT_STRICT_CONCURRENCY: complete
