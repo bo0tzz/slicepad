@@ -12,12 +12,19 @@ Desktop Orca is involved once, to author the profile.
 The engine works and is verified against real inputs. The app does not exist yet.
 
 - **Done**: headless libslic3r, the C ABI, auto-orient, arrange, overrides,
-  cancellation, slice statistics, and the geometry a plate view needs. Ten gates
-  compare all of it against G-code sliced by desktop Orca from the same profile
-  and mesh — including a byte-identical match, 3328 of 3328 commands, starting
-  from a raw Shapr3D export.
-- **Not started**: the iOS build (blocked on getting the dependency set to build
-  for Apple targets), the SwiftUI app, Moonraker upload, and G-code thumbnails.
+  cancellation, slice statistics, G-code thumbnails, and the geometry a plate view
+  needs. Eleven gates compare all of it against G-code sliced by desktop Orca from
+  the same profile and mesh — including a byte-identical match, 3328 of 3328
+  commands, starting from a raw Shapr3D export.
+- **Verified on Apple's toolchain**: the whole dependency set, libslic3r and the
+  gates build and pass on macOS arm64 in CI, using Apple clang, ld64 and SDK.
+- **Not started**: the iOS build — now a cross-compilation problem on a target
+  already known good — the SwiftUI app, and the Moonraker upload.
+
+Two findings qualify what this can promise, both written up under `docs/`:
+slicing is not reproducible at some infill densities, and byte-identical G-code
+is a property of identical code generation rather than of the engine. The iPad
+will produce the same object as your desktop, not the same bytes.
 
 ## How a profile gets here
 

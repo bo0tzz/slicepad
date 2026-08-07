@@ -99,7 +99,10 @@ jobs:
       # The point of the whole exercise: the engine still reproduces desktop
       # OrcaSlicer's G-code for a real profile and mesh.
       - name: Run correctness gates
-        run: ctest --test-dir build/ci --output-on-failure
+        # Verbose even when green: a passing run should show which gates ran and
+        # what they measured, since those numbers are how a platform difference
+        # gets noticed.
+        run: ctest --test-dir build/ci --verbose
 
       # Without the actual output there is no way to tell what differs, and each
       # round trip here costs an hour.
