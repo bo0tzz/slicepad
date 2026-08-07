@@ -59,6 +59,10 @@ final class EngineHost: @unchecked Sendable {
         let version: String
         /// What the profile already says, so the controls start where it left off.
         let settings: Overrides
+        /// True when loading the profile also placed a model that was waiting for a
+        /// bed — the view needs to re-frame, since the part is no longer where the
+        /// camera was pointed.
+        let placedModel: Bool
     }
 
     func loadProfile(at url: URL) async throws -> LoadedProfile {
@@ -69,11 +73,14 @@ final class EngineHost: @unchecked Sendable {
             // not be placed at the time. Nothing else would revisit that, and the
             // symptom is a slice refused for a model the app appears to have put
             // down properly.
+            var placed = false
             if Self.isOffBed(engine) {
                 try? engine.arrange()
+                placed = true
             }
             return LoadedProfile(version: engine.profileVersion,
-                                 settings: Overrides(from: engine.resolvedConfig()))
+                                 settings: Overrides(from: engine.resolvedConfig()),
+                                 placedModel: placed)
         }
     }
 

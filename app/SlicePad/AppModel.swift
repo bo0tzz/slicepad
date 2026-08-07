@@ -71,6 +71,7 @@ final class AppModel: ObservableObject {
             let profile = try await host.loadProfile(at: url)
             let version = profile.version
             self.overrides = profile.settings
+            if profile.placedModel { self.modelGeneration += 1 }
             self.profileName = url.deletingPathExtension().lastPathComponent
             // A mismatch is normal — libslic3r migrates older profiles — so this is
             // worth showing but not worth blocking on.
