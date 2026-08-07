@@ -1,0 +1,61 @@
+# Let the dependency superbuild target another Apple platform.
+#
+# Building for iOS leaves CMAKE_SYSTEM_PROCESSOR empty, which drops an argument
+# from a list(FIND) and from OpenSSL's STREQUAL comparisons — both hard errors
+# before anything compiles. The cross-compile detection also asks the wrong
+# question: it compares architectures, so iOS on an arm64 Mac looks native.
+#
+# OpenSSL additionally needs its own iOS target: Apple cross-compiles through
+# clang and -arch rather than a toolchain prefix, so the Linux branch asks for a
+# --cross-compile-prefix that does not exist.
+
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index bdabf189..1858ee29 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -131,7 +131,17 @@ if (APPLE)
+     endif ()
+     set(CMAKE_FIND_FRAMEWORK LAST)
+     set(CMAKE_FIND_APPBUNDLE LAST)
+-    list(FIND CMAKE_OSX_ARCHITECTURES ${CMAKE_SYSTEM_PROCESSOR} _arch_idx)
++    # Targeting iOS leaves CMAKE_SYSTEM_PROCESSOR empty, which drops an argument
++    # from the list(FIND) below and makes it a hard error. It is also the wrong
++    # question: this compares architectures, so building for iOS on an arm64 Mac
++    # would look native even though the sysroot differs entirely.
++    set(_arch_idx -1)
++    if (CMAKE_SYSTEM_PROCESSOR)
++        list(FIND CMAKE_OSX_ARCHITECTURES "${CMAKE_SYSTEM_PROCESSOR}" _arch_idx)
++    endif ()
++    if (NOT CMAKE_SYSTEM_NAME STREQUAL CMAKE_HOST_SYSTEM_NAME)
++        set(_arch_idx -1)  # a different Apple platform is always a cross build
++    endif ()
+     message(STATUS "prusaslicer_add_cmake_project for Apple")
+     if (CMAKE_OSX_ARCHITECTURES AND _arch_idx LESS 0)
+         message(STATUS "prusaslicer_add_cmake_project for Apple crosscompiling")
+diff --git a/deps/OpenSSL/OpenSSL.cmake b/deps/OpenSSL/OpenSSL.cmake
+index 21a49b91..eb3cf299 100644
+--- a/deps/OpenSSL/OpenSSL.cmake
++++ b/deps/OpenSSL/OpenSSL.cmake
+@@ -30,12 +30,19 @@ else()
+     set(_cross_comp_prefix_line "")
+     set(_make_cmd make -j${NPROC})
+     set(_install_cmd make -j${NPROC} install_sw)
+-    if (CMAKE_CROSSCOMPILING)
++    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++        # Apple cross-compiles through clang and -arch rather than a toolchain
++        # prefix, and OpenSSL has a target of its own for this. Without the branch
++        # an iOS build falls into the Linux one below and asks for a prefix that
++        # does not exist.
++        set(_cross_arch "ios64-cross")
++        set(_cross_comp_prefix_line "")
++    elseif (CMAKE_CROSSCOMPILING)
+         set(_cross_comp_prefix_line "--cross-compile-prefix=${TOOLCHAIN_PREFIX}-")
+ 
+-        if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64" OR ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm64")
++        if ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "aarch64" OR "${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64")
+             set(_cross_arch "linux-aarch64")
+-        elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armhf") # For raspbian
++        elseif ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "armhf") # For raspbian
+             # TODO: verify
+             set(_cross_arch "linux-armv4")
+         endif ()
