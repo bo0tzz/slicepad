@@ -2,7 +2,9 @@ import SwiftUI
 
 struct Inspector: View {
     @ObservedObject var model: AppModel
-    @Binding var importingProfile: Bool
+    /// Closure rather than a binding: presenting the importer is the one view
+    /// that owns it, and this button is only another way to ask for it.
+    let setProfile: () -> Void
 
     @AppStorage("printerAddress") private var printerAddress = ""
     @AppStorage("startAfterUpload") private var startAfterUpload = false
@@ -19,7 +21,7 @@ struct Inspector: View {
                         Text(note).font(.footnote).foregroundStyle(.secondary)
                     }
                 } else {
-                    Button("Set profile…") { importingProfile = true }
+                    Button("Set profile…") { setProfile() }
                 }
             }
 
