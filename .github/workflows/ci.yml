@@ -177,15 +177,26 @@ jobs:
       - name: Check the patch stack reproduces the checkout
         run: mise run check-patches
 
-      - name: Cache dependency prefix
+      # Split restore from save, and save even when the job fails. Bringing this
+      # target up means a long chain of dependencies where each fix reveals the
+      # next failure, and a cache that only stores on success makes every one of
+      # those rebuild all the ones that already worked. The superbuild's own
+      # directory comes along for the same reason: its stamps are what let a
+      # retry resume rather than restart. A patch change moves the key, so stale
+      # stamps cannot outlive the source they were built from.
+      - name: Restore dependency build
         id: deps-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: build/deps-prefix
-          key: deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}
+          path: |
+            build/deps-prefix
+            build/deps
+            build/dl-cache
+          key: deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}-${{ github.run_id }}
+          restore-keys: |
+            deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}-
 
       - name: Build dependencies for iOS
-        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: mise run deps
         env:
           ORCA_DEPS_NPROC: 4
@@ -198,6 +209,17 @@ jobs:
         if: failure()
         run: |
           find build/deps -name config.log -print -exec cat {} \; || true
+
+      - name: Save dependency build
+        if: always() && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/deps-prefix
+            build/deps
+            build/dl-cache
+          key: deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}-${{ github.run_id }}
+
       # Building the engine, not running it: the gates need a simulator or a
       # device, which is a later step. This proves libslic3r and the core compile
       # and link for the target.
