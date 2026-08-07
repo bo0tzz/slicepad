@@ -116,7 +116,6 @@ final class AppModel: ObservableObject {
 
     func slice() {
         guard canSlice else { return }
-        isSlicing = true
         progress = 0
         stage = "Starting"
         cancelFlag = CancelFlag()
@@ -127,7 +126,11 @@ final class AppModel: ObservableObject {
         let overrides = overrides
         let cancelFlag = cancelFlag
 
+        // Raised here rather than before the call: creating the engine can fail, and
+        // that path never enters this closure — which would leave the button
+        // spinning on a slice that never started.
         run { host in
+            self.isSlicing = true
             defer { self.isSlicing = false }
             do {
                 let stats = try await host.slice(overrides: overrides, to: output) { percent, stage in
