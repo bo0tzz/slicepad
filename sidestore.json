@@ -1,0 +1,25 @@
+{
+  "name": "SlicePad",
+  "identifier": "bo0tzz.slicepad.source",
+  "apps": [
+    {
+      "name": "SlicePad",
+      "bundleIdentifier": "me.bo0tzz.slicepad",
+      "developerName": "bo0tzz",
+      "subtitle": "OrcaSlicer's engine, on an iPad.",
+      "iconURL": "https://raw.githubusercontent.com/bo0tzz/slicepad/main/app/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+      "localizedDescription": "Slice 3D models on an iPad with OrcaSlicer's own engine, driven by a profile you export from desktop Orca.\n\nOpen a mesh \u2014 Shapr3D's export works directly \u2014 adjust wall count, infill and supports, slice, and send the G-code to a Klipper printer over Moonraker.\n\nUnsigned and distributed outside the App Store: OrcaSlicer is AGPL-3.0, which Apple's terms are incompatible with.",
+      "versions": [
+        {
+          "version": "0.0.1",
+          "date": "2026-08-07",
+          "localizedDescription": "SlicePad 0.0.1.",
+          "downloadURL": "https://github.com/bo0tzz/slicepad/releases/download/v0.0.1/SlicePad.ipa",
+          "size": 5723764,
+          "sha256": "55e8fb8411ba7d2f8e2e44f0d8bc2d92339a49f9f0ec526d12e89e8d5d9a10ed",
+          "minOSVersion": "17.0"
+        }
+      ]
+    }
+  ]
+}
