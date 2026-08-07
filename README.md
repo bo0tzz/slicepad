@@ -21,10 +21,14 @@ The engine works and is verified against real inputs. The app does not exist yet
 - **Not started**: the iOS build — now a cross-compilation problem on a target
   already known good — the SwiftUI app, and the Moonraker upload.
 
-Two findings qualify what this can promise, both written up under `docs/`:
-slicing is not reproducible at some infill densities, and byte-identical G-code
-is a property of identical code generation rather than of the engine. The iPad
-will produce the same object as your desktop, not the same bytes.
+One finding qualifies what this can promise: byte-identical G-code is a property
+of identical code generation rather than of the engine, so the iPad will produce
+the same object as your desktop, not the same bytes. Gate 2 asks for equality only
+on the architecture the reference came from.
+
+An apparent nondeterminism in slicing turned out to be this project driving
+libslic3r wrongly rather than a defect in it; `docs/nondeterminism.md` keeps the
+account because the reasoning failed in an instructive way.
 
 ## How a profile gets here
 

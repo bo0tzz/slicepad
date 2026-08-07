@@ -1,78 +1,65 @@
-# A nondeterministic slice result
+# A nondeterministic slice result — and why it was ours
 
-Found while making gate 7 assert that raising infill density raises filament
-usage. It does — but not reproducibly.
+Resolved. This file previously described an apparent nondeterminism in
+libslic3r's adaptive infill. The engine was fine. The bug was in how this project
+drove it.
 
-## What happens
+Kept rather than deleted, because the reasoning was wrong in an instructive way.
 
-Slicing the fixture with `sparse_infill_density=60%` yields **either 435.82mm or
-329.44mm** of filament. Both values are exact and repeatable; a given process
-always produces the same one, and repeating the identical slice within that
-process gives the identical answer three times out of three.
+## The symptom
 
-Roughly one run in three takes the other branch.
+Slicing the fixture with `sparse_infill_density=60%` yielded **either 435.82mm or
+329.44mm** of filament. Both exact and repeatable: a given process always produced
+the same one, repeating the slice within that process gave the same answer every
+time, and roughly one run in three took the other branch.
 
-## What it is not
+## The cause
 
-- **Not the overrides.** The resolved configuration is correct in both cases —
-  `walls=3 infill=60%` — printed and checked.
-- **Not the model.** Object bounds agree to six decimal places across runs.
-- **Not ASLR.** `setarch -R` does not make it deterministic, so it is not pointer
-  ordering.
-- **Not engine state.** A fresh `sp_engine` with its own freshly loaded profile and
-  model still flips.
-- **Not slicing in general.** Driven from the CLI as the only slice in the process,
-  the same job gives 435.82mm every time.
+`sp_slice` constructed a **fresh `Print` for every slice**. Desktop Orca keeps one
+`Print` alive for the session and calls `apply()` on it repeatedly — the whole
+invalidation machinery in `PrintBase` exists for that. Building a new one each
+time is not how the library expects to be driven, and it left state that
+influenced later slices.
 
-## What it looks like
+Using one `Print` per engine and applying to it makes the result identical across
+runs. It also changes the correct answer: 60% infill uses **442mm**, not the
+435.82mm that had looked like the "good" branch. Both previous values were wrong.
 
-State that is process-global rather than engine-local, established during earlier
-slices and then stable. Two discrete outcomes rather than noise suggests a race
-whose tiny difference lands either side of a threshold — plausibly in the adaptive
-cubic octree, since the profile uses `adaptivecubic` and a `grid` pattern behaves
-differently.
+## What the investigation got right and wrong
 
-## The amplifier, found later
+Everything ruled out was about *inputs* — the resolved configuration, the model's
+bounds, ASLR, engine state, whether slicing was deterministic in isolation. All of
+that was sound and all of it was beside the point, because the calling pattern was
+never questioned.
 
-`FillAdaptive.cpp`'s `make_cubes_properties` decides the octree's depth with a
-threshold:
+The strongest clue was recorded and misread: **a single slice in a process was
+always stable, and only repeated slices flipped**. That is the signature of reused
+state. It was written down as evidence that "slicing in general is fine" rather
+than as a pointer at the thing doing the reusing.
 
-```cpp
-for (double edge_length = line_spacing * 2.;; edge_length *= 2.) {
-    ...
-    if (edge_length > max_cube_edge_length)
-        break;
-}
-```
+An amplifier was also identified — `FillAdaptive`'s octree depth is a step
+function of `max_cube_edge_length / line_spacing`, so a tiny difference flips a
+whole level of subdivision. That part still stands and explains why the symptom
+was two discrete values rather than noise. It was an accurate explanation of the
+mechanism attached to an incorrect assumption about the source.
 
-The number of levels is therefore a step function of
-`max_cube_edge_length / line_spacing`. A difference in the last bits of either
-input flips an entire level of subdivision, which is how a tiny numerical
-difference becomes two discrete outcomes instead of noise. It also explains why
-density matters: `line_spacing` comes from the density, so only some densities sit
-near a boundary — 20% does not, 60% does.
+## Two bugs it was hiding
 
-This identifies the amplifier, not the source. What makes the input differ between
-processes is still unknown.
+Switching to a persistent `Print` immediately exposed two more, both invisible
+while every slice got a fresh object:
 
-One correction to the investigation above: the claim that object bounds are
-identical is weaker than it sounds, because `sp_object_bounds` returns floats. A
-double-precision difference in the last bits — exactly the size that would flip
-this threshold — would not have shown up.
+- **Cancellation was sticky.** `print.cancel()` leaves the Print flagged, so every
+  later slice failed instantly with "cancelled" until `restart()` was called first.
+- **The status callback outlived its slice.** Passing a null progress callback left
+  the *previous* one installed — so a slice after a cancelled one inherited the
+  cancelling callback and cancelled itself.
 
-## Why it does not invalidate the engine work
+Neither could have been caught by a fresh Print per slice, and both would have hit
+a real UI: slice, cancel, slice again.
 
-The profile's own settings are unaffected. Gates 2, 3 and 6 — byte-identical
-G-code against the desktop, filament and time matching exactly, and the full
-raw-export workflow — passed in every run while this was being investigated,
-across dozens of runs. The instability appears only at a non-default density.
+## The lesson worth keeping
 
-## Why it matters anyway
-
-The app will reuse one engine across many slices, and a person changing infill
-density is exactly the case this affects. A filament or time estimate that differs
-by 25% between two identical slices would rightly destroy confidence in the tool.
-
-Worth pursuing when there is time to read the adaptive infill code properly.
-Reproduce with `tests/gate.cpp`'s gate 7 asserting the direction of the change
-rather than only that it changed.
+The question "is the library nondeterministic?" was asked and answered carefully
+for a week's worth of hypotheses. The question "am I using it the way it expects?"
+was never asked, and it took someone pointing out that a 25% swing is implausible
+for software this widely used.

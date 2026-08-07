@@ -486,14 +486,9 @@ int main(int argc, char **argv)
                     failures += fail("gate7", "one wall loop used " + std::to_string(thinner_walls) +
                                                   "mm, not less than the baseline " +
                                                   std::to_string(baseline));
-                // Direction is asserted for walls but not for density. Raising
-                // density to 60% reproducibly changes the result and reproducibly
-                // reaches the engine, but whether it lands on 436mm or 329mm varies
-                // per process — see docs/nondeterminism.md. Asserting only that it
-                // moved keeps this gate meaningful without encoding a bug.
-                if (std::fabs(denser_infill - baseline) / baseline < 0.05)
+                if (denser_infill <= baseline)
                     failures += fail("gate7", "60% infill used " + std::to_string(denser_infill) +
-                                                  "mm, barely different from the baseline " +
+                                                  "mm, not more than the baseline " +
                                                   std::to_string(baseline));
                 if (failures == 0)
                     reported("gate7"), std::printf("gate7 overrides: baseline %.0fmm, one wall %.0fmm, dense infill %.0fmm\n",

@@ -30,6 +30,11 @@
 using namespace Slic3r;
 
 struct sp_engine {
+    // One Print for the engine's lifetime, applied to repeatedly. That is how the
+    // desktop drives it — Plater holds a Slic3r::Print and calls apply() — and the
+    // invalidation machinery exists for exactly that. Constructing a fresh Print
+    // per slice is not how the library expects to be used.
+    Print print;
     DynamicPrintConfig config;   // the loaded profile, already fully resolved
     DynamicPrintConfig overrides;
     Model model;
@@ -567,7 +572,11 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
             return SP_ERR_SLICE;
         }
 
-        Print print;
+        Print &print = engine->print;
+        // The Print outlives the slice now, and cancelling leaves it flagged. Clear
+        // it or every subsequent slice fails immediately with "cancelled" — which
+        // the previous fresh-Print-per-slice arrangement hid.
+        print.restart();
         print.apply(engine->model, config);
 
         // Print::m_isBBLPrinter has no initialiser and is never assigned inside
@@ -588,6 +597,9 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
             return SP_ERR_SLICE;
         }
 
+        // Always replace the callback, including with a no-op: it lives on the
+        // Print, so passing nullptr after a cancelling slice would otherwise leave
+        // the previous one attached and cancel this one too.
         if (progress != nullptr) {
             // The callback's return value is how a caller cancels. libslic3r polls
             // its cancel status between steps and unwinds with CanceledException,
@@ -597,6 +609,8 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
                 if (progress(int(status.percent), status.text.c_str(), user) != 0)
                     print.cancel();
             });
+        } else {
+            print.set_status_callback([](const PrintBase::SlicingStatus &) {});
         }
 
         GCodeProcessorResult result;
