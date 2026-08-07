@@ -149,6 +149,17 @@ std::string line_containing(const std::string &text, const std::string &needle)
     return {};
 }
 
+// Every gate reports itself, and the total is checked at the end. Deleting a gate
+// otherwise looks exactly like it passing — which is how five of them once went
+// missing while the suite still said PASS.
+int gates_reported = 0;
+
+int reported(const char *gate)
+{
+    ++gates_reported;
+    return 0;
+}
+
 int fail(const char *gate, const std::string &detail)
 {
     std::fprintf(stderr, "FAIL %s: %s\n", gate, detail.c_str());
@@ -188,7 +199,7 @@ int compare_gcode(const char *gate, const std::vector<std::string> &ref,
         std::printf("%s gcode: %zu commands against %zu, extrusions within %.1f%% "
                     "(not the reference architecture, so equivalence not equality)\n",
                     gate, ours.size(), ref.size(), drift * 100.0);
-        return 0;
+        return reported(gate);
     }
 
     if (ref.size() != ours.size()) {
@@ -216,7 +227,7 @@ int compare_gcode(const char *gate, const std::vector<std::string> &ref,
                                   "\n  reference: " + ref[i] + "\n  ours:      " + ours[i]);
 
     std::printf("%s gcode: all %zu commands identical in sequence\n", gate, ref.size());
-    return 0;
+    return reported(gate);
 }
 
 } // namespace
@@ -268,7 +279,7 @@ int main(int argc, char **argv)
                 unexpected.push_back(key + " (reference " + ref_value + ", ours " + found->second + ")");
         }
 
-        std::printf("gate1 config: %zu/%zu keys identical, %zu known differences\n",
+        reported("gate1"), std::printf("gate1 config: %zu/%zu keys identical, %zu known differences\n",
                     matched, compared, compared - matched);
         if (compared < 500)
             failures += fail("gate1", "suspiciously few keys compared — is the reference intact?");
@@ -284,7 +295,7 @@ int main(int argc, char **argv)
     } else {
         const auto ref = commands_of(read_file(reference));
         const auto ours = commands_of(read_file(produced));
-        std::printf("gate2 gcode: %zu reference commands, %zu ours\n", ref.size(), ours.size());
+        reported("gate2"), std::printf("gate2 gcode: %zu reference commands, %zu ours\n", ref.size(), ours.size());
         failures += compare_gcode("gate2", ref, ours);
     }
 
@@ -364,7 +375,7 @@ int main(int argc, char **argv)
                                               " but the desktop reaches " +
                                               std::to_string(reference_top));
             else
-                std::printf("gate4 toolpath: %zu segments, top %.2fmm matches the desktop\n",
+                reported("gate4"), std::printf("gate4 toolpath: %zu segments, top %.2fmm matches the desktop\n",
                             segments, double(top));
 
             // Gate 5: the geometry a plate view draws. Checked by cross-referencing
@@ -405,7 +416,7 @@ int main(int argc, char **argv)
                 if (bed_points < 3)
                     failures += fail("gate5", "printable area has too few points");
                 else
-                    std::printf("gate5 geometry: %zu triangles, %zu bed points, "
+                    reported("gate5"), std::printf("gate5 geometry: %zu triangles, %zu bed points, "
                                 "model %.1fx%.1fx%.1fmm consistent with the slice\n",
                                 triangles, bed_points, double(hi[0] - lo[0]),
                                 double(hi[1] - lo[1]), double(hi[2] - lo[2]));
@@ -485,7 +496,7 @@ int main(int argc, char **argv)
                                                   "mm, barely different from the baseline " +
                                                   std::to_string(baseline));
                 if (failures == 0)
-                    std::printf("gate7 overrides: baseline %.0fmm, one wall %.0fmm, dense infill %.0fmm\n",
+                    reported("gate7"), std::printf("gate7 overrides: baseline %.0fmm, one wall %.0fmm, dense infill %.0fmm\n",
                                 baseline, thinner_walls, denser_infill);
             }
             sp_engine_destroy(fresh);
@@ -511,7 +522,7 @@ int main(int argc, char **argv)
         else if (std::filesystem::exists(abandoned))
             failures += fail("gate8", "a cancelled slice left its output file behind");
         else
-            std::printf("gate8 cancellation: stopped after %d progress calls, no output left\n",
+            reported("gate8"), std::printf("gate8 cancellation: stopped after %d progress calls, no output left\n",
                         calls);
     }
 
@@ -549,7 +560,7 @@ int main(int argc, char **argv)
                 failures += fail("gate9", "scale 2 gave width " + std::to_string(extent(scaled, 0)) +
                                               " from " + std::to_string(extent(before, 0)));
             } else if (failures == 0) {
-                std::printf("gate9 transform: X rotation swaps Y/Z (%.1f/%.1f -> %.1f/%.1f), "
+                reported("gate9"), std::printf("gate9 transform: X rotation swaps Y/Z (%.1f/%.1f -> %.1f/%.1f), "
                             "scale 2 doubles width\n",
                             double(extent(before, 1)), double(extent(before, 2)),
                             double(extent(rotated, 1)), double(extent(rotated, 2)));
@@ -609,7 +620,7 @@ int main(int argc, char **argv)
                     }
                 }
                 if (failures == 0)
-                    std::printf("gate11 thumbnails: %zu embedded at the desktop's sizes\n",
+                    reported("gate11"), std::printf("gate11 thumbnails: %zu embedded at the desktop's sizes\n",
                                 ours_sizes.size());
             }
         }
@@ -658,13 +669,20 @@ int main(int argc, char **argv)
                     failures += fail("gate10", std::string(c.what) + ": refused without a message");
             }
             if (failures == 0)
-                std::printf("gate10 failure paths: %zu wrong inputs each refused with a reason\n",
+                reported("gate10"), std::printf("gate10 failure paths: %zu wrong inputs each refused with a reason\n",
                             sizeof(cases) / sizeof(cases[0]));
             sp_engine_destroy(probe);
         }
     }
 
     sp_engine_destroy(engine);
+
+    constexpr int kExpectedGates = 11;
+    if (failures == 0 && gates_reported != kExpectedGates)
+        failures += fail("suite", "only " + std::to_string(gates_reported) + " of " +
+                                      std::to_string(kExpectedGates) +
+                                      " gates reported — has one been removed or skipped?");
+
     if (failures == 0)
         std::puts("PASS");
     return failures == 0 ? 0 : 1;
