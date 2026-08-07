@@ -37,6 +37,7 @@ constexpr bool kReferenceArchitecture = false;
 #endif
 
 
+
 // Keys where a difference from the reference is understood and expected.
 const std::vector<std::pair<const char *, const char *>> kKnownConfigDiffs = {
     {"enable_prime_tower",
@@ -154,10 +155,11 @@ int fail(const char *gate, const std::string &detail)
     return 1;
 }
 
+
 // Compares produced G-code against the desktop's. Byte equality is required only
 // on the architecture the reference was made on; elsewhere the same object is
-// required rather than the same bytes. Shared by every gate that makes this
-// comparison, so the rule cannot drift between them.
+// required rather than the same bytes. Shared so the rule cannot drift between
+// the gates that use it.
 int compare_gcode(const char *gate, const std::vector<std::string> &ref,
                   const std::vector<std::string> &ours)
 {
@@ -216,7 +218,6 @@ int compare_gcode(const char *gate, const std::vector<std::string> &ref,
     std::printf("%s gcode: all %zu commands identical in sequence\n", gate, ref.size());
     return 0;
 }
-
 
 } // namespace
 
@@ -284,8 +285,6 @@ int main(int argc, char **argv)
         const auto ref = commands_of(read_file(reference));
         const auto ours = commands_of(read_file(produced));
         std::printf("gate2 gcode: %zu reference commands, %zu ours\n", ref.size(), ours.size());
-        // Without a floor, two unreadable files both yield zero commands and the
-        // comparison below would report them as identical.
         failures += compare_gcode("gate2", ref, ours);
     }
 
@@ -430,11 +429,238 @@ int main(int argc, char **argv)
         } else if (sp_slice(engine, out.c_str(), nullptr, nullptr) != SP_OK) {
             failures += fail("gate6", std::string("slicing: ") + sp_last_error(engine));
         } else {
-            // The same rule as gate 2, via the same code: on a non-reference
-            // architecture this asks whether the raw export produces the same
-            // object, which is the claim that actually matters.
+            // The same rule, via the same code: on a non-reference architecture
+            // this asks whether the raw export produces the same object.
             failures += compare_gcode("gate6", commands_of(read_file(reference)),
                                       commands_of(read_file(out)));
+        }
+    }
+
+    // Gate 7: the three overrides the UI exposes. Accepting a key and validating
+    // it against PrintConfigDef proves nothing about whether it reaches the
+    // engine, so each is checked for moving filament usage in the direction it
+    // should.
+    //
+    // On its own engine, deliberately. Running these on the engine the gates above
+    // have been using gives one of two stable results per process — the same
+    // inputs, the same model bounds to six decimals, and yet a baseline of either
+    // 385mm or 280mm. Something in libslic3r carries state across slices on one
+    // engine, and a test that inherits it measures that instead of the override.
+    // Worth remembering beyond the test: the app will reuse one engine too.
+    if (failures == 0) {
+        sp_engine *fresh = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (fresh == nullptr) {
+            failures += fail("gate7", "could not create an engine");
+        } else if (sp_load_config(fresh, profile.c_str()) != SP_OK ||
+                   sp_load_model(fresh, model.c_str()) != SP_OK) {
+            failures += fail("gate7", std::string("setting up: ") + sp_last_error(fresh));
+        } else {
+            auto filament_for = [&](const char *overrides) -> double {
+                if (sp_set_overrides(fresh, overrides) != SP_OK)
+                    return -1.0;
+                const std::string out = work + "/override.gcode";
+                if (sp_slice(fresh, out.c_str(), nullptr, nullptr) != SP_OK)
+                    return -1.0;
+                return number_after(sp_slice_stats_json(fresh), "\"filament_mm\":");
+            };
+
+            const double baseline = filament_for(nullptr);
+            const double thinner_walls = filament_for("{\"wall_loops\":\"1\"}");
+            const double denser_infill = filament_for("{\"sparse_infill_density\":\"60%\"}");
+
+            if (baseline <= 0.0 || thinner_walls <= 0.0 || denser_infill <= 0.0) {
+                failures += fail("gate7", std::string("an override slice failed: ") + sp_last_error(fresh));
+            } else {
+                if (thinner_walls >= baseline)
+                    failures += fail("gate7", "one wall loop used " + std::to_string(thinner_walls) +
+                                                  "mm, not less than the baseline " +
+                                                  std::to_string(baseline));
+                // Direction is asserted for walls but not for density. Raising
+                // density to 60% reproducibly changes the result and reproducibly
+                // reaches the engine, but whether it lands on 436mm or 329mm varies
+                // per process — see docs/nondeterminism.md. Asserting only that it
+                // moved keeps this gate meaningful without encoding a bug.
+                if (std::fabs(denser_infill - baseline) / baseline < 0.05)
+                    failures += fail("gate7", "60% infill used " + std::to_string(denser_infill) +
+                                                  "mm, barely different from the baseline " +
+                                                  std::to_string(baseline));
+                if (failures == 0)
+                    std::printf("gate7 overrides: baseline %.0fmm, one wall %.0fmm, dense infill %.0fmm\n",
+                                baseline, thinner_walls, denser_infill);
+            }
+            sp_engine_destroy(fresh);
+        }
+    }
+
+    // Gate 8: cancellation, because the header promises it and a slice on a
+    // tablet runs long enough that a caller will want it. Also checks the partial
+    // file is cleaned up rather than left looking like a finished slice.
+    if (failures == 0) {
+        const std::string abandoned = work + "/cancelled.gcode";
+        int calls = 0;
+        auto cancel_immediately = [](int, const char *, void *counter) {
+            ++*static_cast<int *>(counter);
+            return 1; // non-zero means stop
+        };
+        const sp_result outcome = sp_slice(engine, abandoned.c_str(), cancel_immediately, &calls);
+        if (outcome != SP_ERR_CANCELLED)
+            failures += fail("gate8", "cancelling returned " + std::to_string(int(outcome)) +
+                                          " rather than SP_ERR_CANCELLED");
+        else if (calls == 0)
+            failures += fail("gate8", "the progress callback was never invoked");
+        else if (std::filesystem::exists(abandoned))
+            failures += fail("gate8", "a cancelled slice left its output file behind");
+        else
+            std::printf("gate8 cancellation: stopped after %d progress calls, no output left\n",
+                        calls);
+    }
+
+    // Gate 9: the transform controls a UI binds to. Rotation about X or Y is the
+    // part that matters — it is how a part stands up — and it is checked by the
+    // dimensions it must produce rather than by inspecting a matrix.
+    if (failures == 0) {
+        const std::string raw = fixtures + "/model-shapr3d.3mf";
+        float before[6] = {0}, rotated[6] = {0}, scaled[6] = {0};
+        auto extent = [](const float *b, int axis) { return b[axis + 3] - b[axis]; };
+
+        if (sp_load_model(engine, raw.c_str()) != SP_OK ||
+            sp_object_bounds(engine, 0, before) != SP_OK) {
+            failures += fail("gate9", std::string("reloading the raw export: ") + sp_last_error(engine));
+        } else if (sp_set_transform(engine, 0, 1.0, 90.0, 0.0, 0.0, 100.0, 100.0) != SP_OK ||
+                   sp_object_bounds(engine, 0, rotated) != SP_OK) {
+            failures += fail("gate9", std::string("rotating about X: ") + sp_last_error(engine));
+        } else {
+            // A quarter turn about X exchanges the Y and Z extents.
+            const bool swapped = std::fabs(extent(rotated, 1) - extent(before, 2)) < 0.05 &&
+                                 std::fabs(extent(rotated, 2) - extent(before, 1)) < 0.05;
+            if (!swapped)
+                failures += fail("gate9", "90 degrees about X gave " +
+                                              std::to_string(extent(rotated, 1)) + " x " +
+                                              std::to_string(extent(rotated, 2)) +
+                                              " in Y,Z from " + std::to_string(extent(before, 1)) +
+                                              " x " + std::to_string(extent(before, 2)));
+            if (rotated[2] < -0.05)
+                failures += fail("gate9", "rotation left the object below the bed");
+
+            if (sp_set_transform(engine, 0, 2.0, 0.0, 0.0, 0.0, 100.0, 100.0) != SP_OK ||
+                sp_object_bounds(engine, 0, scaled) != SP_OK) {
+                failures += fail("gate9", std::string("scaling: ") + sp_last_error(engine));
+            } else if (std::fabs(extent(scaled, 0) - 2 * extent(before, 0)) > 0.05) {
+                failures += fail("gate9", "scale 2 gave width " + std::to_string(extent(scaled, 0)) +
+                                              " from " + std::to_string(extent(before, 0)));
+            } else if (failures == 0) {
+                std::printf("gate9 transform: X rotation swaps Y/Z (%.1f/%.1f -> %.1f/%.1f), "
+                            "scale 2 doubles width\n",
+                            double(extent(before, 1)), double(extent(before, 2)),
+                            double(extent(rotated, 1)), double(extent(rotated, 2)));
+            }
+        }
+    }
+
+    // Gate 11: thumbnails. libslic3r does the PNG encoding, so what is checked
+    // here is that our renderer supplied pixels at every size the profile asks
+    // for, and that they carry content — a blank frame compresses to a few
+    // hundred bytes, so the size floor separates a drawn model from an empty one.
+    if (failures == 0) {
+        const std::string with_thumbs = work + "/thumbnail.gcode";
+        if (sp_load_model(engine, (fixtures + "/model.3mf").c_str()) != SP_OK ||
+            sp_slice(engine, with_thumbs.c_str(), nullptr, nullptr) != SP_OK) {
+            failures += fail("gate11", std::string("slicing for thumbnails: ") + sp_last_error(engine));
+        } else {
+            // Sizes are compared per dimension against the desktop's own
+            // thumbnails rather than against a fixed floor: a flat threshold is
+            // meaningless across 300x300 and 32x32, where even the reference's
+            // small one is only 628 bytes.
+            auto thumbnails_in = [](const std::string &text) {
+                std::map<std::string, long> sizes;
+                for (const std::string &line : lines_of(text)) {
+                    const size_t at = line.find("thumbnail begin ");
+                    if (at == std::string::npos)
+                        continue;
+                    std::istringstream fields(line.substr(at + 16));
+                    std::string dims;
+                    long bytes = 0;
+                    if (fields >> dims >> bytes)
+                        sizes[dims] = bytes;
+                }
+                return sizes;
+            };
+
+            const auto ours_sizes = thumbnails_in(read_file(with_thumbs));
+            const auto their_sizes = thumbnails_in(read_file(reference));
+
+            if (ours_sizes.size() != their_sizes.size()) {
+                failures += fail("gate11", "produced " + std::to_string(ours_sizes.size()) +
+                                               " thumbnails against the desktop's " +
+                                               std::to_string(their_sizes.size()));
+            } else {
+                for (const auto &[dims, theirs] : their_sizes) {
+                    const auto found = ours_sizes.find(dims);
+                    if (found == ours_sizes.end()) {
+                        failures += fail("gate11", "no thumbnail at " + dims);
+                    } else if (found->second * 4 < theirs) {
+                        // A blank frame compresses to almost nothing, so a quarter
+                        // of the desktop's size still separates drawn from empty
+                        // while allowing for our simpler shading.
+                        failures += fail("gate11", dims + " thumbnail is " +
+                                                       std::to_string(found->second) +
+                                                       " bytes against the desktop's " +
+                                                       std::to_string(theirs));
+                    }
+                }
+                if (failures == 0)
+                    std::printf("gate11 thumbnails: %zu embedded at the desktop's sizes\n",
+                                ours_sizes.size());
+            }
+        }
+    }
+
+    // Gate 10: failure paths, on a fresh engine so the checks above are undisturbed.
+    // A UI shows these messages to a person, and picking the wrong file is the
+    // likeliest mistake now that profile and model are separate surfaces — so
+    // each wrong input must be refused with the right code rather than
+    // half-succeeding.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (probe == nullptr) {
+            failures += fail("gate10", "could not create a second engine");
+        } else {
+            struct Case { const char *what; sp_result got; sp_result want; };
+            const std::string missing = fixtures + "/does-not-exist.3mf";
+            const std::string mesh_only = fixtures + "/model-shapr3d.3mf";
+            const std::string carrier = fixtures + "/empty.3mf";
+
+            const Case cases[] = {
+                {"profile that does not exist",
+                 sp_load_config(probe, missing.c_str()), SP_ERR_IO},
+                {"a bare mesh offered as a profile",
+                 sp_load_config(probe, mesh_only.c_str()), SP_ERR_UNRESOLVED},
+                {"slicing with nothing loaded",
+                 sp_slice(probe, (work + "/never.gcode").c_str(), nullptr, nullptr), SP_ERR_STATE},
+                {"model that does not exist",
+                 sp_load_model(probe, missing.c_str()), SP_ERR_IO},
+                {"a profile carrier offered as a model",
+                 sp_load_model(probe, carrier.c_str()), SP_ERR_SLICE},
+                {"unknown override key",
+                 sp_set_overrides(probe, "{\"not_a_real_key\":\"1\"}"), SP_ERR_PARSE},
+                {"override value of the wrong shape",
+                 sp_set_overrides(probe, "{\"wall_loops\":\"three\"}"), SP_ERR_PARSE},
+                {"malformed override JSON",
+                 sp_set_overrides(probe, "{oops"), SP_ERR_PARSE},
+            };
+
+            for (const Case &c : cases) {
+                if (c.got != c.want)
+                    failures += fail("gate10", std::string(c.what) + ": returned " +
+                                                   std::to_string(int(c.got)) + ", expected " +
+                                                   std::to_string(int(c.want)));
+                else if (std::string(sp_last_error(probe)).empty())
+                    failures += fail("gate10", std::string(c.what) + ": refused without a message");
+            }
+            if (failures == 0)
+                std::printf("gate10 failure paths: %zu wrong inputs each refused with a reason\n",
+                            sizeof(cases) / sizeof(cases[0]));
+            sp_engine_destroy(probe);
         }
     }
 
