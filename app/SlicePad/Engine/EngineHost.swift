@@ -22,10 +22,38 @@ struct PlateGeometry {
 
 /// Serialises access to the engine, which is single-threaded per instance, and
 /// keeps slicing off the main thread.
-actor EngineHost {
+///
+/// A dedicated thread rather than an actor, because a slice is a synchronous C
+/// call that does not return for as long as it takes. Swift's cooperative pool
+/// has one thread per core and expects work to yield; parking one of them for a
+/// minute starves everything else scheduled on it. A queue of our own is the
+/// right place for blocking work, and serialising it gives the same guarantee
+/// the engine asks for: one call at a time.
+final class EngineHost: @unchecked Sendable {
     private let engine: Engine
+    private let queue = DispatchQueue(label: "slicepad.engine", qos: .userInitiated)
 
-    init() throws { engine = try Engine() }
+    init() throws {
+        engine = try Engine()
+    }
+
+    /// Every entry point funnels through here, so "one call at a time, never on the
+    /// caller's thread" is stated once rather than per method.
+    private func perform<T: Sendable>(_ work: @escaping @Sendable (Engine) throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                continuation.resume(with: Result { try work(self.engine) })
+            }
+        }
+    }
+
+    private func perform<T: Sendable>(_ work: @escaping @Sendable (Engine) -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: work(self.engine))
+            }
+        }
+    }
 
     struct LoadedProfile {
         let version: String
@@ -33,51 +61,66 @@ actor EngineHost {
         let settings: Overrides
     }
 
-    func loadProfile(at url: URL) throws -> LoadedProfile {
-        try engine.loadProfile(at: url)
-        return LoadedProfile(version: engine.profileVersion,
-                             settings: Overrides(from: engine.resolvedConfig()))
+    func loadProfile(at url: URL) async throws -> LoadedProfile {
+        try await perform { engine in
+            try engine.loadProfile(at: url)
+            return LoadedProfile(version: engine.profileVersion,
+                                 settings: Overrides(from: engine.resolvedConfig()))
+        }
     }
 
-    func loadModel(at url: URL) throws -> Int {
-        try engine.loadModel(at: url)
-        return engine.repairedErrors
+    func loadModel(at url: URL) async throws -> Int {
+        try await perform { engine in
+            try engine.loadModel(at: url)
+            return engine.repairedErrors
+        }
     }
 
-    func autoOrient() throws { try engine.autoOrient() }
+    func autoOrient() async throws {
+        try await perform { try $0.autoOrient() }
+    }
 
     /// What the Z control should read after the engine has placed the object itself.
-    func rotationZ() -> Double { engine.transform()?[3] ?? 0 }
-    func arrange() throws { try engine.arrange() }
+    func rotationZ() async -> Double {
+        await perform { $0.transform()?[3] ?? 0 }
+    }
+
+    func arrange() async throws {
+        try await perform { try $0.arrange() }
+    }
 
     /// Applies just the two controls the app exposes, keeping everything else where
     /// the engine already has it: the X and Y rotation auto-orient chose, and the
     /// position the object was placed at. sp_set_transform is absolute in every
     /// argument, so passing zeros for those would silently undo both.
-    func setScaleAndRotation(scale: Double, rotateZ: Double) throws {
-        let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
-        try engine.setTransform(scale: scale, rotateX: current[1], rotateY: current[2],
-                                rotateZ: rotateZ, translateX: current[4],
-                                translateY: current[5])
+    func setScaleAndRotation(scale: Double, rotateZ: Double) async throws {
+        try await perform { engine in
+            let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
+            try engine.setTransform(scale: scale, rotateX: current[1], rotateY: current[2],
+                                    rotateZ: rotateZ, translateX: current[4],
+                                    translateY: current[5])
+        }
     }
 
     func slice(overrides: Overrides, to url: URL,
-               onProgress: @Sendable @escaping (Int, String) -> Bool) throws -> SliceStats? {
-        try engine.setOverrides(overrides)
-        try engine.slice(to: url, onProgress: onProgress)
-        return engine.stats
+               onProgress: @Sendable @escaping (Int, String) -> Bool) async throws -> SliceStats? {
+        try await perform { engine in
+            try engine.setOverrides(overrides)
+            try engine.slice(to: url, onProgress: onProgress)
+            return engine.stats
+        }
     }
 
     /// One call for everything the view draws, so a redraw cannot mix geometry from
     /// two different engine states.
-    func geometry(includeToolpath: Bool) -> PlateGeometry {
-        PlateGeometry(
-            bed: engine.bedOutline(),
-            triangles: engine.meshTriangles(),
-            toolpath: includeToolpath ? engine.toolpathSegments() : [],
-            bounds: engine.objectCount > 0 ? engine.objectBounds() : nil
-        )
+    func geometry(includeToolpath: Bool) async -> PlateGeometry {
+        await perform { engine in
+            PlateGeometry(
+                bed: engine.bedOutline(),
+                triangles: engine.meshTriangles(),
+                toolpath: includeToolpath ? engine.toolpathSegments() : [],
+                bounds: engine.objectCount > 0 ? engine.objectBounds() : nil
+            )
+        }
     }
-
-    var hasModel: Bool { engine.objectCount > 0 }
 }
