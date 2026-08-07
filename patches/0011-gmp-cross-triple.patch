@@ -1,12 +1,15 @@
-# Build GMP for a target that is not the build machine.
+# Cross-compile the autotools dependencies to another Apple platform.
 #
-# --build describes the machine doing the building, but the recipe derived it
-# from CMAKE_SYSTEM_PROCESSOR, which describes the target and is empty when that
-# target is iOS. The result was a bare "-apple-darwin" triple and a config.sub
-# failure before anything compiled.
+# GMP derived --build from CMAKE_SYSTEM_PROCESSOR, which describes the target and
+# is empty for iOS, producing a bare "-apple-darwin" triple and a config.sub
+# failure. --build describes the machine doing the building, so it comes from the
+# host processor. iOS also needs -miphoneos-version-min and the iPhoneOS sysroot
+# rather than -mmacosx-version-min.
 #
-# Cross-compiling to iOS also needs -miphoneos-version-min and the iPhoneOS
-# sysroot rather than -mmacosx-version-min.
+# MPFR reuses GMP's flags and triple, so it inherits those fixes, but it also
+# passed --host=${TOOLCHAIN_PREFIX} whenever CMAKE_CROSSCOMPILING was set.
+# TOOLCHAIN_PREFIX is a Linux-cross convention and is never defined on Apple, so
+# an iOS build sent configure a bare --host=.
 
 diff --git a/deps/GMP/GMP.cmake b/deps/GMP/GMP.cmake
 index b3ba1817..45ba1a26 100644
@@ -52,3 +55,22 @@ index b3ba1817..45ba1a26 100644
              set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-darwin)
          else ()
              set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
+diff --git a/deps/MPFR/MPFR.cmake b/deps/MPFR/MPFR.cmake
+index 755a7699..9df288f4 100644
+--- a/deps/MPFR/MPFR.cmake
++++ b/deps/MPFR/MPFR.cmake
+@@ -19,10 +19,13 @@ if (MSVC)
+ else ()
+ 
+     set(_cross_compile_arg "")
+-    if (CMAKE_CROSSCOMPILING)
++    if (CMAKE_CROSSCOMPILING AND TOOLCHAIN_PREFIX)
+         # TOOLCHAIN_PREFIX should be defined in the toolchain file
+         set(_cross_compile_arg --host=${TOOLCHAIN_PREFIX})
+     endif ()
++    # Apple cross builds are cross-compiling but have no toolchain prefix — the
++    # triple arrives through _gmp_build_tgt below — so without the guard above
++    # this passed a bare --host= to configure.
+ 
+     ExternalProject_Add(dep_MPFR
+         URL https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.bz2
