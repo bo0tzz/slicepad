@@ -2,9 +2,10 @@ import SwiftUI
 
 struct Inspector: View {
     @ObservedObject var model: AppModel
-    /// Closure rather than a binding: presenting the importer is the one view
-    /// that owns it, and this button is only another way to ask for it.
+    /// Closures rather than bindings: one view owns the file importer, and these
+    /// are just other ways to ask it for something.
     let setProfile: () -> Void
+    let openModel: () -> Void
 
     @AppStorage("printerAddress") private var printerAddress = ""
     @AppStorage("startAfterUpload") private var startAfterUpload = false
@@ -14,20 +15,35 @@ struct Inspector: View {
 
     var body: some View {
         Form {
+            // Both files are asked for here, and separately: they are different
+            // things that arrive in the same format, so the app never guesses which
+            // one you meant from what you picked.
             Section("Profile") {
                 if let name = model.profileName {
                     LabeledContent("Loaded", value: name)
                     if let note = model.profileVersionNote {
                         Text(note).font(.footnote).foregroundStyle(.secondary)
                     }
+                    Button("Change profile…") { setProfile() }
                 } else {
                     Button("Set profile…") { setProfile() }
+                    Text("A project saved from desktop Orca — File → Save Project As.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
+            if model.modelName == nil {
+                Section("Model") {
+                    Button("Open model…") { openModel() }
+                    Text("A .3mf, .stl or .obj — a Shapr3D export works directly.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
 
             if model.modelName != nil {
                 Section("Model") {
                     LabeledContent("File", value: model.modelName ?? "")
+                    Button("Open another…") { openModel() }
                     if model.repairedErrors > 0 {
                         Label("Repaired \(model.repairedErrors) mesh defects",
                               systemImage: "bandage")

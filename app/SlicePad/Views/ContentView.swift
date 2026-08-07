@@ -40,32 +40,31 @@ struct ContentView: View {
         UTType(filenameExtension: "obj") ?? .data,
     ]
 
+    // No NavigationStack and no toolbar. This is one screen that never navigates,
+    // so a navigation bar only contributed a second bar behind the controls — and
+    // toolbar content is a separate view hierarchy, which is what made the Profile
+    // button do nothing and would have stopped the Model/Layers switch redrawing.
+    // Ordinary views in the layout cannot fail either way.
     var body: some View {
-        NavigationStack {
-            HStack(spacing: 0) {
+        HStack(spacing: 0) {
+            ZStack(alignment: .top) {
                 plate
-                Divider()
-                Inspector(model: model, setProfile: { startImport(.profile) })
-                    .frame(width: 320)
-            }
-            .navigationTitle("SlicePad")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Profile", systemImage: "slider.horizontal.3") { startImport(.profile) }
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Open Model", systemImage: "cube") { startImport(.model) }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
+                if model.modelName != nil {
                     Picker("View", selection: $model.display) {
                         ForEach(AppModel.Display.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .disabled(model.modelName == nil)
+                    .frame(width: 220)
+                    .padding(.top, 12)
                 }
             }
+            Divider()
+            Inspector(model: model,
+                      setProfile: { startImport(.profile) },
+                      openModel: { startImport(.model) })
+                .frame(width: 320)
         }
+        .ignoresSafeArea(.keyboard)
         .fileImporter(isPresented: $isImporting,
                       allowedContentTypes: importKind.types) { result in
             guard case let .success(url) = result else { return }
