@@ -112,12 +112,23 @@ jobs:
       # Dependencies change only when the pin or the patch stack moves, so in
       # steady state this restores instead of building, and during bring-up a
       # failure does not discard the ones that already succeeded.
+      # Key the cache on the dependency recipes themselves rather than on the whole
+      # patch stack. A patch to src/libslic3r cannot change what the dependencies
+      # build to, but it does change hashFiles('patches/*.patch') — which threw
+      # away a 40-minute build for a one-line fix in a single engine source file.
+      - name: Fingerprint the dependency sources
+        id: deps-fp
+        run: |
+          hash=$(find third_party/orcaslicer/deps -type f -print0 \
+                 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
       - name: Cache dependency prefix
         id: deps-cache
         uses: actions/cache@v4
         with:
           path: build/deps-prefix
-          key: deps-macos-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}
+          key: deps-macos-arm64-${{ steps.deps-fp.outputs.hash }}
 
       - name: Build dependencies
         if: steps.deps-cache.outputs.cache-hit != 'true'
@@ -206,6 +217,17 @@ jobs:
       # directory comes along for the same reason: its stamps are what let a
       # retry resume rather than restart. A patch change moves the key, so stale
       # stamps cannot outlive the source they were built from.
+      # Key the cache on the dependency recipes themselves rather than on the whole
+      # patch stack. A patch to src/libslic3r cannot change what the dependencies
+      # build to, but it does change hashFiles('patches/*.patch') — which threw
+      # away a 40-minute build for a one-line fix in a single engine source file.
+      - name: Fingerprint the dependency sources
+        id: deps-fp
+        run: |
+          hash=$(find third_party/orcaslicer/deps -type f -print0 \
+                 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
       - name: Restore dependency build
         id: deps-cache
         uses: actions/cache/restore@v4
@@ -214,9 +236,9 @@ jobs:
             build/deps-prefix
             build/deps
             build/dl-cache
-          key: deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}-${{ github.run_id }}
+          key: deps-ios-arm64-${{ steps.deps-fp.outputs.hash }}-${{ github.run_id }}
           restore-keys: |
-            deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}-
+            deps-ios-arm64-${{ steps.deps-fp.outputs.hash }}-
 
       - name: Build dependencies for iOS
         run: mise run deps
@@ -241,7 +263,7 @@ jobs:
             build/deps-prefix
             build/deps
             build/dl-cache
-          key: deps-ios-arm64-${{ hashFiles('scripts/fetch-orca.sh', 'patches/*.patch') }}-${{ github.run_id }}
+          key: deps-ios-arm64-${{ steps.deps-fp.outputs.hash }}-${{ github.run_id }}
 
       # Building the engine, not running it: the gates need a simulator or a
       # device, which is a later step. This proves libslic3r and the core compile
