@@ -39,7 +39,10 @@ targets:
         # The engine is C++; without this the Swift target links the C ABI but not
         # the standard library the implementation behind it needs.
         CLANG_CXX_LIBRARY: libc++
-        OTHER_LDFLAGS: -lc++ -lz
+        # libslic3r links Foundation and ModelIO, and frameworks are link flags
+        # rather than archives — merging static libraries cannot carry them, so the
+        # app has to name them itself. Both exist on iOS.
+        OTHER_LDFLAGS: -lc++ -lz -framework Foundation -framework ModelIO
         # Documents come in through the picker, which is why there is no file
         # sharing here: nothing is meant to live inside the app.
         SWIFT_STRICT_CONCURRENCY: complete

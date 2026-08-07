@@ -150,8 +150,12 @@ const char *sp_slice_stats_json(const sp_engine *engine);
  * sp_mesh_* gives the loaded model's triangles in bed millimetres with object
  * and instance transforms already applied — nine floats per triangle, ready for
  * a vertex buffer. sp_bed_* gives the printable area outline from the profile,
- * as x,y pairs. Both are owned by the engine: the mesh is valid until the next
- * sp_load_model or sp_set_transform, the bed until the next sp_load_config.
+ * as x,y pairs. Both are owned by the engine.
+ *
+ * The mesh is rebuilt, and any pointer to it invalidated, by anything that moves
+ * geometry: sp_load_model, sp_set_transform, sp_arrange and sp_auto_orient. The
+ * bed lasts until the next sp_load_config. Copy out what you need rather than
+ * holding these across calls.
  *
  * sp_object_bounds writes min then max as six floats (x,y,z,x,y,z). */
 size_t sp_mesh_triangle_count(const sp_engine *engine);

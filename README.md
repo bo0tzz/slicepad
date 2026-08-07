@@ -14,7 +14,7 @@ not run on a device, because the iOS build is not finished.
 
 - **Done**: headless libslic3r, the C ABI, auto-orient, arrange, overrides,
   cancellation, slice statistics, G-code thumbnails, and the geometry a plate view
-  needs. Twelve gates compare all of it against G-code sliced by desktop Orca from
+  needs. Thirteen gates compare all of it against G-code sliced by desktop Orca from
   the same profile and mesh — including a byte-identical match, 3328 of 3328
   commands, starting from a raw Shapr3D export.
 - **Verified on Apple's toolchain**: the whole dependency set, libslic3r and the
@@ -127,11 +127,15 @@ There is no Mac in the inner loop, which shapes everything:
    controls, a typed address turned into a URL. Linking is what the iOS job is
    for; nothing short of a device covers the rest.
 
-`tests/gate.cpp` is the safety net: twelve gates covering config resolution,
+`tests/gate.cpp` is the safety net: thirteen gates covering config resolution,
 G-code equality, statistics, toolpath and plate geometry, the override controls,
-cancellation, transforms, placement round-tripping, thumbnails and the failure
-paths. The suite also checks that twelve of them reported, because a deleted test
-otherwise looks exactly like a passing one. Plain C++ over the C ABI with no
+cancellation, transforms, placement round-tripping, thumbnails, the reported
+metadata and the failure paths. The suite also checks that thirteen of them
+reported, because a deleted test otherwise looks exactly like a passing one.
+
+Every function in the ABI is called by at least one gate. That is a deliberate
+floor rather than a coverage metric: each documentation-versus-implementation
+mismatch found in this ABI has been in a function no gate called. Plain C++ over the C ABI with no
 platform dependencies, so the same source runs on an Apple target later. Both
 `ctest` and the binary directly take a fixtures directory and a working directory.
 
