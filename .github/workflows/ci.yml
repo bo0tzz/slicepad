@@ -288,6 +288,32 @@ jobs:
         env:
           NPROC: 4
 
+      # A successful link says the symbols resolved, not that the right things are
+      # in the bundle. These are the failures that would otherwise show up on the
+      # device: an engine that did not actually get linked in, a build for the
+      # wrong platform, or a missing resources directory that makes
+      # sp_engine_create fail on launch with nothing to point at.
+      - name: Check the built app
+        run: |
+          app=build/dd/Build/Products/Release-iphoneos/SlicePad.app
+          test -x "$app/SlicePad" || { echo "no executable in the bundle"; exit 1; }
+
+          archs=$(lipo -archs "$app/SlicePad")
+          [ "$archs" = "arm64" ] || { echo "built for '$archs', expected arm64"; exit 1; }
+
+          vtool -show-build "$app/SlicePad" | grep -q "platform IOS" \
+            || { echo "not built for the iOS platform"; exit 1; }
+
+          # A string only libslic3r emits, so this fails if the engine was dropped
+          # from the link and the app is a shell around an empty ABI.
+          strings "$app/SlicePad" | grep -q "Generating perimeters" \
+            || { echo "the slicing engine is not in the binary"; exit 1; }
+
+          test -d "$app/orca-resources" \
+            || { echo "orca-resources missing from the bundle"; exit 1; }
+
+          echo "arm64 iOS app, engine linked, resources present"
+
       # The delivery path: SideStore signs with the installing device's own
       # certificate, so an unsigned .ipa is what it wants.
       - name: Keep the app
