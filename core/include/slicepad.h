@@ -75,10 +75,16 @@ int sp_model_repaired_errors(const sp_engine *engine);
 /* Replaces any previously loaded model. Accepts .stl, .3mf, and .obj — note
  * that STEP is deliberately not built, so OCCT is absent.
  *
- * Loading also places the object the way desktop Orca does: dropped onto the
- * bed, and centred if it is a bare mesh export rather than a saved project,
- * which keeps its own placement. CAD exports otherwise arrive at the origin
- * with negative coordinates. */
+ * Loading drops each object onto the bed in Z, as Plater does, and a saved
+ * project keeps the placement it came with.
+ *
+ * It does NOT move anything in X or Y. A bare CAD export therefore stays where
+ * it was modelled — usually the origin, often with negative coordinates — and
+ * sp_slice refuses it as outside the printable area rather than emitting G-code
+ * that would drive the toolhead off the bed. Call sp_arrange (and, for a part
+ * lying in a modelling orientation, sp_auto_orient) to place it. Centring here
+ * was tried and made libslic3r emit INT64_MIN coordinates for the test model;
+ * see the note in sp_load_model's implementation. */
 sp_result sp_load_model(sp_engine *engine, const char *path);
 int sp_object_count(const sp_engine *engine);
 

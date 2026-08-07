@@ -72,8 +72,33 @@ final class EngineHost: @unchecked Sendable {
     func loadModel(at url: URL) async throws -> Int {
         try await perform { engine in
             try engine.loadModel(at: url)
+
+            // A CAD export arrives where it was modelled — for Shapr3D that is the
+            // origin, with negative coordinates — and the engine refuses to slice
+            // anything off the bed. Desktop Orca puts an import on the plate for
+            // you; without this the first thing the app does with a real export is
+            // report "outside the printable area".
+            //
+            // Only when it is actually off the bed, so a saved project keeps the
+            // placement it came with. Arranging needs the bed, so it does nothing
+            // useful before a profile is loaded — and slicing is blocked until then
+            // anyway, which is where the missing profile gets reported.
+            if Self.isOffBed(engine) {
+                try? engine.arrange()
+            }
             return engine.repairedErrors
         }
+    }
+
+    private static func isOffBed(_ engine: Engine) -> Bool {
+        let bed = engine.bedOutline()
+        guard !bed.isEmpty, let bounds = engine.objectBounds() else { return false }
+        // The bed outline can be any polygon; its bounding rectangle is enough to
+        // answer "did this land somewhere impossible", which is the question here.
+        let minX = bed.map(\.x).min() ?? 0, maxX = bed.map(\.x).max() ?? 0
+        let minY = bed.map(\.y).min() ?? 0, maxY = bed.map(\.y).max() ?? 0
+        return bounds.min.x < minX || bounds.min.y < minY
+            || bounds.max.x > maxX || bounds.max.y > maxY
     }
 
     func autoOrient() async throws {
