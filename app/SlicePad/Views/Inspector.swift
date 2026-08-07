@@ -110,29 +110,33 @@ struct Inspector: View {
                         }
                     }
 
-                    Section("Printer") {
-                        TextField("http://printer.local", text: $printerAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                        SecureField("API key (optional)", text: $printerKey)
-                        Toggle("Start printing after upload", isOn: $startAfterUpload)
+                }
+            }
 
-                        if model.isSending {
-                            HStack {
-                                ProgressView()
-                                Text(model.sendState ?? "").font(.footnote)
-                            }
-                        } else {
-                            Button("Send to printer") {
-                                model.send(to: printerAddress, apiKey: printerKey,
-                                           startPrint: startAfterUpload)
-                            }
-                            .disabled(printerAddress.isEmpty)
-                            if let state = model.sendState {
-                                Text(state).font(.footnote).foregroundStyle(.secondary)
-                            }
-                        }
+            // Shown before there is anything to send, so the address can be
+            // typed once rather than discovered as a missing step after the
+            // first slice.
+            Section("Printer") {
+                TextField("http://printer.local", text: $printerAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                SecureField("API key (optional)", text: $printerKey)
+                Toggle("Start printing after upload", isOn: $startAfterUpload)
+
+                if model.isSending {
+                    HStack {
+                        ProgressView()
+                        Text(model.sendState ?? "").font(.footnote)
+                    }
+                } else {
+                    Button("Send to printer") {
+                        model.send(to: printerAddress, apiKey: printerKey,
+                                   startPrint: startAfterUpload)
+                    }
+                    .disabled(printerAddress.isEmpty || model.gcodeURL == nil)
+                    if let state = model.sendState {
+                        Text(state).font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }
