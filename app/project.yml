@@ -5,7 +5,9 @@
 # Mac in the inner loop to notice.
 name: SlicePad
 options:
-  bundleIdPrefix: org.futo
+  # Not tied to any organisation. It only has to be unique on the device — change
+  # it to whatever you sign with.
+  bundleIdPrefix: dev.slicepad
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -26,7 +28,7 @@ targets:
         embed: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.futo.slicepad
+        PRODUCT_BUNDLE_IDENTIFIER: dev.slicepad.app
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
