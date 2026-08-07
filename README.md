@@ -9,8 +9,8 @@ Desktop Orca is involved once, to author the profile.
 
 ## Status
 
-The engine works and is verified against real inputs. The app is written but has
-not run on a device, because the iOS build is not finished.
+The engine works and is verified against real inputs. Everything builds for the
+iPad and CI publishes an installable app; nothing has been run on a device yet.
 
 - **Done**: headless libslic3r, the C ABI, auto-orient, arrange, overrides,
   cancellation, slice statistics, G-code thumbnails, and the geometry a plate view
@@ -19,14 +19,18 @@ not run on a device, because the iOS build is not finished.
   commands, starting from a raw Shapr3D export.
 - **Verified on Apple's toolchain**: the whole dependency set, libslic3r and the
   gates build and pass on macOS arm64 in CI, using Apple clang, ld64 and SDK.
-- **Written, not yet run**: the SwiftUI app — plate view, the three overrides,
-  slicing with progress and cancellation, and the Moonraker upload. CI type checks
-  it against the iOS SDK on every push, which catches everything except linking.
-- **In progress**: the iOS cross-compile. All 105 dependencies now build for
-  arm64-iOS; what remains is configuring and compiling the engine itself against
-  them, and linking it into the app. `docs/ios-cross-compile.md` records the
-  pattern, since every failure so far has been the build system assuming the
-  target is the machine it is running on.
+- **Builds for the iPad**: all 113 dependencies, libslic3r, the C ABI and the
+  SwiftUI app compile and link for arm64-iOS, and every run publishes an unsigned
+  `.ipa` — see `docs/sideloading.md`. CI checks the bundle is what it claims:
+  arm64, the iOS platform, the engine actually in the binary, resources present.
+- **Written, not yet run**: the app — plate view, the three overrides, slicing
+  with progress and cancellation, and the Moonraker upload. Type checked against
+  the iOS SDK on every push, and its parsing is checked by running it, but no
+  part of it has executed on a device.
+
+The gap that remains is the important one: the engine is compiled for iOS and
+verified on macOS arm64 — same compiler, same architecture — but has never run on
+an iOS platform. Building the gates for the simulator would close most of it.
 
 One finding qualifies what this can promise: byte-identical G-code is a property
 of identical code generation rather than of the engine, so the iPad will produce

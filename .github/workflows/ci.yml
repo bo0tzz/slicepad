@@ -179,18 +179,16 @@ jobs:
           path: build/ci/gate-work/*.gcode
           if-no-files-found: warn
 
-  # Bring-up, not yet a gate. iOS is the actual target, and the dependency
-  # superbuild has no notion of it: its cross-compile detection compares
-  # architectures rather than systems, so building for iOS on an arm64 Mac looks
-  # native to it. Expect this to fail for a while.
+  # The actual target: the dependency set, libslic3r, the C ABI and the app all
+  # built for arm64-iOS, packaged as an unsigned .ipa.
   #
-  # continue-on-error while that is true, so the macOS job above stays a
-  # meaningful signal instead of every run showing red. Remove it once this
-  # passes — a job that cannot fail the build is not a test.
+  # It builds the engine but does not run it — the gates need a simulator or a
+  # device — so a green result here means "compiles, links, and ships what it
+  # should", not "slices correctly on an iPad". The macOS job is what checks the
+  # output, on the same compiler and architecture.
   ios-deps:
-    name: ios-arm64 (bring-up)
+    name: ios-arm64
     runs-on: macos-26
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
