@@ -136,6 +136,8 @@ jobs:
             --repo "${{ github.repository }}"
           if ! git diff --quiet sidestore.json; then
             git add sidestore.json
-            git commit -m "Add ${{ steps.version.outputs.version }} to the SideStore source"
+            # [skip ci]: this commit changes one JSON file that no build reads,
+            # and a release should not queue an hour of dependency building.
+            git commit -m "Add ${{ steps.version.outputs.version }} to the SideStore source [skip ci]"
             git push origin main
           fi
