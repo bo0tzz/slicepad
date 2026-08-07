@@ -82,6 +82,16 @@ struct ContentView: View {
             let directory = URL(fileURLWithPath: fixtures)
             model.loadProfile(directory.appendingPathComponent("model.3mf"))
             model.loadModel(directory.appendingPathComponent("model-shapr3d.3mf"))
+
+            // And slice, when asked, so a screenshot can show the layer view. Both
+            // loads are asynchronous, so this waits for them rather than assuming
+            // they have landed.
+            guard ProcessInfo.processInfo.environment["SLICEPAD_PRELOAD_SLICE"] != nil else { return }
+            for _ in 0 ..< 100 {
+                if model.canSlice { break }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            model.slice()
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.error != nil },
                                                             set: { if !$0 { model.error = nil } })) {
