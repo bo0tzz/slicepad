@@ -74,6 +74,26 @@ struct PlateView: UIViewRepresentable {
     // MARK: Nodes
 
     private func bedNode(_ outline: [SIMD2<Float>]) -> SCNNode {
+        let node = SCNNode()
+
+        // A surface as well as an outline. Four thin lines around a 350mm square
+        // read as nothing much; a plate you can see the part standing on reads as
+        // a bed. Its bounding rectangle is enough — printers whose bed is not a
+        // rectangle would only lose a little of the corner shading.
+        let xs = outline.map(\.x), ys = outline.map(\.y)
+        if let lowX = xs.min(), let highX = xs.max(),
+           let lowY = ys.min(), let highY = ys.max() {
+            let surface = SCNPlane(width: CGFloat(highX - lowX), height: CGFloat(highY - lowY))
+            surface.firstMaterial?.diffuse.contents = UIColor.secondarySystemBackground
+            surface.firstMaterial?.isDoubleSided = true
+            surface.firstMaterial?.lightingModel = .constant
+            let surfaceNode = SCNNode(geometry: surface)
+            // Just below the bed plane, so it does not fight with a model sitting
+            // exactly at z = 0.
+            surfaceNode.position = SCNVector3((lowX + highX) / 2, (lowY + highY) / 2, -0.05)
+            node.addChildNode(surfaceNode)
+        }
+
         var vertices: [SCNVector3] = []
         for i in outline.indices {
             let a = outline[i], b = outline[(i + 1) % outline.count]
@@ -87,7 +107,8 @@ struct PlateView: UIViewRepresentable {
         let geometry = SCNGeometry(sources: [source], elements: [element])
         geometry.firstMaterial?.diffuse.contents = UIColor.systemGray
         geometry.firstMaterial?.lightingModel = .constant
-        return SCNNode(geometry: geometry)
+        node.addChildNode(SCNNode(geometry: geometry))
+        return node
     }
 
     private func solidNode(_ triangles: [SIMD3<Float>]) -> SCNNode? {
@@ -142,9 +163,20 @@ struct PlateView: UIViewRepresentable {
         node.name = "camera"
         node.camera = camera
 
-        let centre = (bounds.min + bounds.max) / 2
-        let span = max(simd_reduce_max(bounds.max - bounds.min), 50)
-        let distance = Double(span) * 2.5
+        // Frame the bed, not the part. Framing the part put a 27mm object in the
+        // middle of an empty view with one corner of a 350mm bed drifting past the
+        // top edge — technically correct and useless, because the question a plate
+        // view answers is where the thing sits on the plate. Pinch still zooms in.
+        var centre = (bounds.min + bounds.max) / 2
+        var span = max(simd_reduce_max(bounds.max - bounds.min), 50)
+        if !bed.isEmpty {
+            let xs = bed.map(\.x), ys = bed.map(\.y)
+            let low = SIMD2(xs.min() ?? 0, ys.min() ?? 0)
+            let high = SIMD2(xs.max() ?? 0, ys.max() ?? 0)
+            centre = SIMD3((low.x + high.x) / 2, (low.y + high.y) / 2, centre.z)
+            span = max(high.x - low.x, high.y - low.y)
+        }
+        let distance = Double(span) * 1.4
 
         // The camera hangs off the scene root, but the geometry sits under a node
         // rotated to make Z up — so the target has to be converted: engine (x,y,z)
