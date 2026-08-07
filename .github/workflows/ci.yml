@@ -8,6 +8,15 @@ on:
   # with nothing to test it and no way to ask for one.
   workflow_dispatch:
 
+# One run per branch. Pushing several commits in a row otherwise queues a full
+# dependency build for each of them against a five-job macOS limit, so the newest
+# commit — the only one worth testing — waits behind work already superseded.
+# Safe to cancel now that the dependency cache saves on failure and cancellation:
+# the next run resumes from wherever this one stopped.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # The app's own feedback loop, and deliberately independent of the engine build:
   # type checking needs the C ABI's header and nothing behind it, so Swift mistakes
