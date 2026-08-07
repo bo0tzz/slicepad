@@ -27,6 +27,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.bo0tzz.slicepad
+        # The INFOPLIST_KEY_* settings below are inputs to a plist Xcode
+        # synthesises, and it only does that when asked. Without this the app links
+        # and then fails validation with no Info.plist at all.
+        GENERATE_INFOPLIST_FILE: true
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
