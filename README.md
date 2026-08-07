@@ -9,7 +9,8 @@ Desktop Orca is involved once, to author the profile.
 
 ## Status
 
-The engine works and is verified against real inputs. The app does not exist yet.
+The engine works and is verified against real inputs. The app is written but has
+not run on a device, because the iOS build is not finished.
 
 - **Done**: headless libslic3r, the C ABI, auto-orient, arrange, overrides,
   cancellation, slice statistics, G-code thumbnails, and the geometry a plate view
@@ -18,8 +19,12 @@ The engine works and is verified against real inputs. The app does not exist yet
   commands, starting from a raw Shapr3D export.
 - **Verified on Apple's toolchain**: the whole dependency set, libslic3r and the
   gates build and pass on macOS arm64 in CI, using Apple clang, ld64 and SDK.
-- **Not started**: the iOS build — now a cross-compilation problem on a target
-  already known good — the SwiftUI app, and the Moonraker upload.
+- **Written, not yet run**: the SwiftUI app — plate view, the three overrides,
+  slicing with progress and cancellation, and the Moonraker upload. CI type checks
+  it against the iOS SDK on every push, which catches everything except linking.
+- **In progress**: the iOS cross-compile. The dependency set is most of the way
+  through; each failure so far has come from the superbuild assuming the target
+  architecture is the host's.
 
 One finding qualifies what this can promise: byte-identical G-code is a property
 of identical code generation rather than of the engine, so the iPad will produce
@@ -61,12 +66,20 @@ non-Klipper printer integration.
 ## Architecture
 
 ```
-SwiftUI app                    does not exist yet
+app/SlicePad                    SwiftUI, iPad only
     │
+    │  Engine.swift             one Swift class, the only file that imports C
+    ▼
     │  core/include/slicepad.h  C ABI, ~25 functions, JSON for structured data
     ▼
 slicepad_core + libslic3r       OrcaSlicer v2.4.2, GUI excluded
 ```
+
+The app links a single `SlicePadCore.xcframework` built by
+`scripts/build-ios-framework.sh`, which merges libslic3r and its dependency
+archives into one library — otherwise the Xcode project carries a list of forty
+static libraries that goes stale at every engine bump. The Xcode project itself is
+generated from `app/project.yml` and not committed, for the same reason.
 
 `libslic3r` is built headless: no wxWidgets, no OpenGL, and with OCCT, OpenVDB and
 OpenCV excluded. Those three are the bulk of the porting pain and none are
@@ -80,6 +93,7 @@ toolpath segments come out ready for a vertex buffer.
 
 | Path | Contents |
 | --- | --- |
+| `app/` | The iPad app, and the XcodeGen spec its project is generated from |
 | `core/` | The C ABI and its implementation over libslic3r |
 | `cli/` | Linux harness driving the same core — the fast development loop |
 | `tests/` | The correctness gates, plain C++ so they run wherever the engine builds |
