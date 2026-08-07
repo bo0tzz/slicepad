@@ -54,10 +54,14 @@ struct PlateView: UIViewRepresentable {
             }
         }
 
-        if context.coordinator.framedGeneration != geometry.modelGeneration,
-           let bounds = geometry.bounds {
-            context.coordinator.framedGeneration = geometry.modelGeneration
-            frameCamera(view, bed: geometry.bed, bounds: bounds)
+        // Each view answers a different question, so each frames differently: the
+        // model view is about where the part sits, which needs the bed; the layer
+        // view is about the print itself, where a whole 350mm bed would leave the
+        // layers a smudge in the middle. Re-framed when either changes.
+        let framing = Coordinator.Framing(generation: geometry.modelGeneration, display: display)
+        if context.coordinator.framing != framing, let bounds = geometry.bounds {
+            context.coordinator.framing = framing
+            frameCamera(view, bed: display == .model ? geometry.bed : [], bounds: bounds)
         }
     }
 
@@ -69,8 +73,13 @@ struct PlateView: UIViewRepresentable {
             let display: AppModel.Display
         }
 
+        struct Framing: Equatable {
+            let generation: Int
+            let display: AppModel.Display
+        }
+
         var state: State?
-        var framedGeneration: Int?
+        var framing: Framing?
     }
 
     // MARK: Nodes
