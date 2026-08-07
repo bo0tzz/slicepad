@@ -268,9 +268,13 @@ jobs:
 
       - name: Boot a simulator
         run: |
+          # An iPad specifically: the app declares TARGETED_DEVICE_FAMILY 2, and
+          # installing it on an iPhone simulator fails with "this app is not made
+          # for this device" rather than anything about the engine.
           udid=$(xcrun simctl list devices available -j \
-                 | jq -r '[.devices[][] | select(.isAvailable)][0].udid')
-          test -n "$udid" || { echo "no simulator available"; exit 1; }
+                 | jq -r '[.devices[][] | select(.isAvailable and (.name | test("iPad")))][0].udid // empty')
+          test -n "$udid" || { echo "no iPad simulator available, and the app is iPad-only"; exit 1; }
+          xcrun simctl list devices available | grep -F "$udid"
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
