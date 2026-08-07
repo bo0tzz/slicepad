@@ -347,6 +347,23 @@ jobs:
             || { echo "the app is no longer running — it died during start-up"; exit 1; }
           echo "app still running after 10s"
 
+      # Nothing else looks at the interface. The engine is checked to the byte and
+      # the app is checked to the slice, but a blank plate or a layout collapsed
+      # into a corner would pass every one of those and still be unusable.
+      - name: Photograph the app
+        if: always()
+        run: |
+          mkdir -p build/shots
+          xcrun simctl io "$SIM_UDID" screenshot build/shots/launched.png || true
+
+      - name: Keep the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-screenshot
+          path: build/shots/*.png
+          if-no-files-found: warn
+
       - name: Keep the crash reports
         if: failure()
         run: find ~/Library/Logs/DiagnosticReports -name 'SlicePad*' -exec cat {} + || true
