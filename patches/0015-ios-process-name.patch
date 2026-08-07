@@ -1,0 +1,51 @@
+# Build utils.cpp for iOS.
+#
+# libproc.h is macOS only and absent from the iOS SDK, so get_process_name did
+# not compile — the single file out of 261 that did not.
+#
+# On iOS an app is one sandboxed process that cannot inspect another, so the only
+# answerable case is its own name. getprogname() is in the BSD layer on every
+# Apple platform and gives exactly that.
+#
+# Deletable if upstream gains a platform check of its own here.
+
+diff --git a/src/libslic3r/utils.cpp b/src/libslic3r/utils.cpp
+index 42dcc148..40e20507 100644
+--- a/src/libslic3r/utils.cpp
++++ b/src/libslic3r/utils.cpp
+@@ -32,7 +32,12 @@
+ 	#endif
+ 	#ifdef __APPLE__
+ 		#include <mach/mach.h>
+-		#include <libproc.h>
++		#include <TargetConditionals.h>
++		// libproc is macOS only. It is absent from the iOS SDK, and inspecting
++		// another process is not something an app there can do in any case.
++		#if TARGET_OS_OSX
++			#include <libproc.h>
++		#endif
+ 	#endif
+ 	#ifdef __linux__
+ 		#include <sys/stat.h>
+@@ -1265,7 +1270,7 @@ std::string get_process_name(int pid)
+ 	while (auto q = strchr(p + 1, '\\'))
+ 		p = q;
+ 	return decode_path(p);
+-#elif defined __APPLE__
++#elif defined(__APPLE__) && TARGET_OS_OSX
+ 	char pathbuf[PROC_PIDPATHINFO_MAXSIZE] = { 0 };
+ 	if (pid == 0) pid = ::getpid();
+ 	int ret = proc_pidpath(pid, pathbuf, sizeof(pathbuf));
+@@ -1273,6 +1278,12 @@ std::string get_process_name(int pid)
+ 	char* p = pathbuf;
+ 	while (auto q = strchr(p + 1, '/')) p = q;
+ 	return p;
++#elif defined __APPLE__
++	// iOS. An app is a single process that cannot look at others, so the only
++	// answerable case is its own name, which is what every caller here wants.
++	(void) pid;
++	const char *name = ::getprogname();
++	return name == nullptr ? std::string() : std::string(name);
+ #else
+     char pathbuf[512]  = {0};
+     char proc_path[32] = "/proc/self/exe";
