@@ -128,8 +128,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
+          # checkout@v4 clones shallowly at the tag, so there is no local main and
+          # no origin/main to switch to — fetch it into a remote ref explicitly and
+          # branch from that.
+          git fetch origin main:refs/remotes/origin/main
+          git checkout -B main origin/main
           python3 scripts/update-source.py \
             --version "${{ steps.version.outputs.version }}" \
             --ipa build/SlicePad.ipa \
