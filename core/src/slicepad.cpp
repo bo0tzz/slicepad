@@ -453,6 +453,38 @@ sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
     });
 }
 
+sp_result sp_object_transform(sp_engine *engine, int object_index, double *out_values)
+{
+    return guard(engine, [&]() -> sp_result {
+        if (!engine->model_loaded || object_index < 0 ||
+            size_t(object_index) >= engine->model.objects.size()) {
+            engine->last_error = "no such object";
+            return SP_ERR_STATE;
+        }
+        if (out_values == nullptr) {
+            engine->last_error = "no output buffer";
+            return SP_ERR_STATE;
+        }
+        const ModelObject *object = engine->model.objects[size_t(object_index)];
+        if (object->instances.empty()) {
+            engine->last_error = "object has no instances";
+            return SP_ERR_STATE;
+        }
+
+        const double to_degrees = 180.0 / M_PI;
+        const ModelInstance *instance = object->instances.front();
+        const Vec3d rotation = instance->get_rotation();
+        const Vec3d offset = instance->get_offset();
+        out_values[0] = instance->get_scaling_factor().x();
+        out_values[1] = rotation.x() * to_degrees;
+        out_values[2] = rotation.y() * to_degrees;
+        out_values[3] = rotation.z() * to_degrees;
+        out_values[4] = offset.x();
+        out_values[5] = offset.y();
+        return SP_OK;
+    });
+}
+
 sp_result sp_arrange(sp_engine *engine)
 {
     return guard(engine, [&]() -> sp_result {

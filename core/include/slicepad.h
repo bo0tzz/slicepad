@@ -94,6 +94,16 @@ sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
                            double rotate_x_deg, double rotate_y_deg,
                            double rotate_z_deg,
                            double translate_x, double translate_y);
+/* The object's current placement, as six doubles: scale, rotation about each axis
+ * in degrees, then translation x and y — exactly the arguments sp_set_transform
+ * takes, so the two round-trip.
+ *
+ * Needed because sp_set_transform is absolute in every argument. A caller that
+ * exposes only some of them, as a simple UI will, has to pass the rest back
+ * unchanged; without this it would send zeros, which teleports the object to the
+ * bed origin and undoes any auto-orientation. */
+sp_result sp_object_transform(sp_engine *engine, int object_index, double *out_values);
+
 /* Place objects on the bed using libslic3r's own arrange — the same code the
  * desktop's arrange button drives. Needs a profile loaded, since the bed comes
  * from it. A bare CAD export arrives at the origin and will not slice until this

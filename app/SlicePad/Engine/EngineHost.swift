@@ -45,13 +45,20 @@ actor EngineHost {
     }
 
     func autoOrient() throws { try engine.autoOrient() }
+
+    /// What the Z control should read after the engine has placed the object itself.
+    func rotationZ() -> Double { engine.transform()?[3] ?? 0 }
     func arrange() throws { try engine.arrange() }
 
-    func setTransform(scale: Double, rotateX: Double, rotateY: Double, rotateZ: Double,
-                      translateX: Double, translateY: Double) throws {
-        try engine.setTransform(scale: scale, rotateX: rotateX, rotateY: rotateY,
-                                rotateZ: rotateZ, translateX: translateX,
-                                translateY: translateY)
+    /// Applies just the two controls the app exposes, keeping everything else where
+    /// the engine already has it: the X and Y rotation auto-orient chose, and the
+    /// position the object was placed at. sp_set_transform is absolute in every
+    /// argument, so passing zeros for those would silently undo both.
+    func setScaleAndRotation(scale: Double, rotateZ: Double) throws {
+        let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
+        try engine.setTransform(scale: scale, rotateX: current[1], rotateY: current[2],
+                                rotateZ: rotateZ, translateX: current[4],
+                                translateY: current[5])
     }
 
     func slice(overrides: Overrides, to url: URL,

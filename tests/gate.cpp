@@ -670,9 +670,73 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 12: placement round-trips. sp_set_transform is absolute in every
+    // argument, so a caller exposing only some of them has to read the rest back
+    // and pass them through unchanged. If it cannot, the app sends zeros — which
+    // drops the object on the bed origin and undoes auto-orient, both silently.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (probe == nullptr) {
+            failures += fail("gate12", "could not create an engine");
+        } else {
+            const std::string profile = fixtures + "/model.3mf";
+            const std::string mesh = fixtures + "/model-shapr3d.3mf";
+            if (sp_load_config(probe, profile.c_str()) != SP_OK ||
+                sp_load_model(probe, mesh.c_str()) != SP_OK) {
+                failures += fail("gate12", std::string("setup: ") + sp_last_error(probe));
+            } else if (sp_set_transform(probe, 0, 1.5, 30, 0, 45, 100, 120) != SP_OK) {
+                failures += fail("gate12", std::string("placing: ") + sp_last_error(probe));
+            } else {
+                const double placed[6] = {1.5, 30, 0, 45, 100, 120};
+                double read_back[6] = {0};
+                if (sp_object_transform(probe, 0, read_back) != SP_OK) {
+                    failures += fail("gate12", std::string("reading back: ") + sp_last_error(probe));
+                } else {
+                    for (int i = 0; i < 6 && failures == 0; ++i)
+                        if (std::fabs(read_back[i] - placed[i]) > 1e-6)
+                            failures += fail("gate12", "component " + std::to_string(i) +
+                                                           " read back as " +
+                                                           std::to_string(read_back[i]) +
+                                                           " after being set to " +
+                                                           std::to_string(placed[i]));
+                }
+
+                // The flow the app actually performs: change one control, pass the
+                // rest back as read. Everything not being changed has to survive —
+                // without the getter the app sends zeros here, which drops the
+                // object on the bed origin and undoes any auto-orientation.
+                if (failures == 0) {
+                    double next[6] = {0};
+                    sp_object_transform(probe, 0, next);
+                    next[0] = 2.0;   // as though a scale control moved
+                    if (sp_set_transform(probe, 0, next[0], next[1], next[2], next[3],
+                                         next[4], next[5]) != SP_OK) {
+                        failures += fail("gate12", std::string("re-applying: ") + sp_last_error(probe));
+                    } else {
+                        double after[6] = {0};
+                        sp_object_transform(probe, 0, after);
+                        const double want[6] = {2.0, 30, 0, 45, 100, 120};
+                        for (int i = 0; i < 6 && failures == 0; ++i)
+                            if (std::fabs(after[i] - want[i]) > 1e-6)
+                                failures += fail("gate12",
+                                                 "changing the scale moved component " +
+                                                     std::to_string(i) + " to " +
+                                                     std::to_string(after[i]) + ", expected " +
+                                                     std::to_string(want[i]));
+                    }
+                }
+
+                if (failures == 0)
+                    reported("gate12"), std::printf(
+                        "gate12 placement: round-trips, and changing one control keeps the rest\n");
+            }
+            sp_engine_destroy(probe);
+        }
+    }
+
     sp_engine_destroy(engine);
 
-    constexpr int kExpectedGates = 11;
+    constexpr int kExpectedGates = 12;
     if (failures == 0 && gates_reported != kExpectedGates)
         failures += fail("suite", "only " + std::to_string(gates_reported) + " of " +
                                       std::to_string(kExpectedGates) +

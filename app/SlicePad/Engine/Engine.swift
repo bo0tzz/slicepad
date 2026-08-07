@@ -139,6 +139,16 @@ final class Engine {
                                    rotateZ, translateX, translateY))
     }
 
+    /// Scale, rotation about each axis in degrees, then translation — the same six
+    /// values `setTransform` takes. Read before writing: every argument there is
+    /// absolute, so anything the caller is not changing has to be passed back
+    /// unchanged.
+    func transform(object: Int = 0) -> [Double]? {
+        var values = [Double](repeating: 0, count: 6)
+        guard sp_object_transform(handle, Int32(object), &values) == SP_OK else { return nil }
+        return values
+    }
+
     func autoOrient() throws { try check(sp_auto_orient(handle)) }
     func arrange() throws { try check(sp_arrange(handle)) }
 

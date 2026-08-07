@@ -8,7 +8,6 @@
 # OpenSSL additionally needs its own iOS target: Apple cross-compiles through
 # clang and -arch rather than a toolchain prefix, so the Linux branch asks for a
 # --cross-compile-prefix that does not exist.
-
 diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
 index bdabf189..1858ee29 100644
 --- a/deps/CMakeLists.txt
@@ -33,10 +32,25 @@ index bdabf189..1858ee29 100644
      if (CMAKE_OSX_ARCHITECTURES AND _arch_idx LESS 0)
          message(STATUS "prusaslicer_add_cmake_project for Apple crosscompiling")
 diff --git a/deps/OpenSSL/OpenSSL.cmake b/deps/OpenSSL/OpenSSL.cmake
-index 21a49b91..eb3cf299 100644
 --- a/deps/OpenSSL/OpenSSL.cmake
 +++ b/deps/OpenSSL/OpenSSL.cmake
-@@ -30,12 +30,19 @@ else()
+@@ -22,7 +22,14 @@
+     set(_make_cmd nmake)
+     set(_install_cmd nmake install_sw )
+ else()
+-    if(APPLE)
++    if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
++        # -mmacosx-version-min is meaningless here, and the ios64-cross target
++        # builds its sysroot out of CROSS_TOP and CROSS_SDK — unset, so it emits
++        # "-isysroot /SDKs/" and every file fails to find a header. Naming the
++        # sysroot outright is both simpler and independent of Xcode's layout.
++        set(_conf_cmd ./Configure -isysroot ${CMAKE_OSX_SYSROOT}
++                                  -mios-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET})
++    elseif(APPLE)
+         set(_conf_cmd export MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET} && ./Configure -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET})
+     else()
+         set(_conf_cmd env "CC=${CMAKE_C_COMPILER}" "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" "./config")
+@@ -30,12 +37,19 @@
      set(_cross_comp_prefix_line "")
      set(_make_cmd make -j${NPROC})
      set(_install_cmd make -j${NPROC} install_sw)

@@ -98,7 +98,9 @@ final class AppModel: ObservableObject {
     func autoOrient() {
         run { host in
             try await host.autoOrient()
-            self.rotateZ = 0
+            // Auto-orient rewrites the rotation entirely, so the Z control has to
+            // follow it rather than assert a value of its own.
+            self.rotateZ = await host.rotationZ()
             await self.refreshGeometry()
         }
     }
@@ -112,8 +114,7 @@ final class AppModel: ObservableObject {
 
     func applyTransform() {
         run { host in
-            try await host.setTransform(scale: self.scale / 100, rotateX: 0, rotateY: 0,
-                                        rotateZ: self.rotateZ, translateX: 0, translateY: 0)
+            try await host.setScaleAndRotation(scale: self.scale / 100, rotateZ: self.rotateZ)
             await self.refreshGeometry()
         }
     }
