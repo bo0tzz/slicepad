@@ -1,0 +1,54 @@
+# Build GMP for a target that is not the build machine.
+#
+# --build describes the machine doing the building, but the recipe derived it
+# from CMAKE_SYSTEM_PROCESSOR, which describes the target and is empty when that
+# target is iOS. The result was a bare "-apple-darwin" triple and a config.sub
+# failure before anything compiled.
+#
+# Cross-compiling to iOS also needs -miphoneos-version-min and the iPhoneOS
+# sysroot rather than -mmacosx-version-min.
+
+diff --git a/deps/GMP/GMP.cmake b/deps/GMP/GMP.cmake
+index b3ba1817..45ba1a26 100644
+--- a/deps/GMP/GMP.cmake
++++ b/deps/GMP/GMP.cmake
+@@ -24,20 +24,34 @@ else ()
+     set(_gmp_build_tgt "${CMAKE_SYSTEM_PROCESSOR}")
+ 
+     if (APPLE)
+-        if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
++        # --build describes the machine doing the building, so it comes from the
++        # host processor. CMAKE_SYSTEM_PROCESSOR describes the target and is empty
++        # when that target is iOS, which produced a bare "-apple-darwin" triple and
++        # a config.sub failure before anything compiled.
++        set(_gmp_build_machine "${CMAKE_SYSTEM_PROCESSOR}")
++        if (NOT _gmp_build_machine)
++            set(_gmp_build_machine "${CMAKE_HOST_SYSTEM_PROCESSOR}")
++        endif ()
++        if (_gmp_build_machine MATCHES "arm")
+             set(_gmp_build_arch aarch64)
+         else ()
+-            set(_gmp_build_arch ${CMAKE_SYSTEM_PROCESSOR})
++            set(_gmp_build_arch ${_gmp_build_machine})
+         endif()
+         if (IS_CROSS_COMPILE)
+-            if (${CMAKE_OSX_ARCHITECTURES} MATCHES "arm")
++            if ("${CMAKE_OSX_ARCHITECTURES}" MATCHES "arm")
+                 set(_gmp_host_arch aarch64)
+                 set(_gmp_host_arch_flags "-arch arm64")
+-            elseif (${CMAKE_OSX_ARCHITECTURES} MATCHES "x86_64")
++            elseif ("${CMAKE_OSX_ARCHITECTURES}" MATCHES "x86_64")
+                 set(_gmp_host_arch x86_64)
+                 set(_gmp_host_arch_flags "-arch x86_64")
+             endif()
+-            set(_gmp_ccflags "${_gmp_ccflags} ${_gmp_host_arch_flags} -mmacosx-version-min=${DEP_OSX_TARGET}")
++            if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++                # A different platform needs its own minimum-version flag and its
++                # own sysroot; -mmacosx-version-min is meaningless here.
++                set(_gmp_ccflags "${_gmp_ccflags} ${_gmp_host_arch_flags} -miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET} -isysroot ${CMAKE_OSX_SYSROOT}")
++            else ()
++                set(_gmp_ccflags "${_gmp_ccflags} ${_gmp_host_arch_flags} -mmacosx-version-min=${DEP_OSX_TARGET}")
++            endif ()
+             set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-darwin)
+         else ()
+             set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
