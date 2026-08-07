@@ -18,8 +18,17 @@ struct Moonraker {
     static func address(from typed: String) -> URL? {
         let trimmed = typed.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
-        let withScheme = trimmed.contains("://") ? trimmed : "http://\(trimmed)"
-        guard let url = URL(string: withScheme), url.host != nil else { return nil }
+
+        // The only decision made here is whether a scheme is already present;
+        // URL does the parsing. Asked as an exact prefix against the two schemes
+        // this speaks, because the obvious alternatives are both wrong: searching
+        // for "://" matches it inside a query string, and asking URLComponents for
+        // a nil scheme reads "sv08.local:7125" as the scheme "sv08.local".
+        let lowered = trimmed.lowercased()
+        let hasScheme = lowered.hasPrefix("http://") || lowered.hasPrefix("https://")
+
+        guard let url = URL(string: hasScheme ? trimmed : "http://\(trimmed)"),
+              url.host?.isEmpty == false else { return nil }
         return url
     }
 
