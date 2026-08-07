@@ -134,10 +134,15 @@ jobs:
             --version "${{ steps.version.outputs.version }}" \
             --ipa build/SlicePad.ipa \
             --repo "${{ github.repository }}"
-          if ! git diff --quiet sidestore.json; then
-            git add sidestore.json
+          # Staged first: on the very first release sidestore.json is untracked,
+          # and `git diff` reports no change for a file it does not know about —
+          # so the file SideStore reads would never have been committed at all.
+          git add sidestore.json
+          if ! git diff --cached --quiet -- sidestore.json; then
             # [skip ci]: this commit changes one JSON file that no build reads,
             # and a release should not queue an hour of dependency building.
             git commit -m "Add ${{ steps.version.outputs.version }} to the SideStore source [skip ci]"
             git push origin main
+          else
+            echo "sidestore.json already lists this version"
           fi
