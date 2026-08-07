@@ -311,8 +311,11 @@ jobs:
           mkdir -p "$fixtures"
           cp testdata/model.3mf testdata/model-shapr3d.3mf "$fixtures/"
 
-          output=$(xcrun simctl launch --console-pty --terminate-running-process \
-            --setenv SLICEPAD_SMOKE="$fixtures" "$SIM_UDID" me.bo0tzz.slicepad 2>&1 | tee /dev/stderr)
+          # simctl passes the child its environment through SIMCTL_CHILD_-prefixed
+          # variables; there is no flag for it.
+          output=$(SIMCTL_CHILD_SLICEPAD_SMOKE="$fixtures" \
+            xcrun simctl launch --console-pty --terminate-running-process \
+            "$SIM_UDID" me.bo0tzz.slicepad 2>&1 | tee /dev/stderr)
           echo "$output" | grep -q "SMOKE OK" \
             || { echo "the app could not slice"; exit 1; }
 
