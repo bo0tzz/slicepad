@@ -14,7 +14,9 @@ struct PlateView: UIViewRepresentable {
         view.scene = SCNScene()
         view.allowsCameraControl = true
         view.autoenablesDefaultLighting = true
-        view.backgroundColor = .systemGroupedBackground
+        // Darker than the plate, so the bed reads as a surface sitting in space
+        // rather than as an outline drawn on the background.
+        view.backgroundColor = .systemGray5
         view.defaultCameraController.interactionMode = .orbitTurntable
         view.defaultCameraController.inertiaEnabled = true
 
@@ -84,7 +86,7 @@ struct PlateView: UIViewRepresentable {
         if let lowX = xs.min(), let highX = xs.max(),
            let lowY = ys.min(), let highY = ys.max() {
             let surface = SCNPlane(width: CGFloat(highX - lowX), height: CGFloat(highY - lowY))
-            surface.firstMaterial?.diffuse.contents = UIColor.secondarySystemBackground
+            surface.firstMaterial?.diffuse.contents = UIColor.systemBackground
             surface.firstMaterial?.isDoubleSided = true
             surface.firstMaterial?.lightingModel = .constant
             let surfaceNode = SCNNode(geometry: surface)
@@ -105,7 +107,7 @@ struct PlateView: UIViewRepresentable {
         let indices = (0 ..< Int32(vertices.count)).map { $0 }
         let element = SCNGeometryElement(indices: indices, primitiveType: .line)
         let geometry = SCNGeometry(sources: [source], elements: [element])
-        geometry.firstMaterial?.diffuse.contents = UIColor.systemGray
+        geometry.firstMaterial?.diffuse.contents = UIColor.systemGray2
         geometry.firstMaterial?.lightingModel = .constant
         node.addChildNode(SCNNode(geometry: geometry))
         return node
@@ -176,7 +178,7 @@ struct PlateView: UIViewRepresentable {
             centre = SIMD3((low.x + high.x) / 2, (low.y + high.y) / 2, centre.z)
             span = max(high.x - low.x, high.y - low.y)
         }
-        let distance = Double(span) * 1.4
+        let distance = Double(span) * 1.15
 
         // The camera hangs off the scene root, but the geometry sits under a node
         // rotated to make Z up — so the target has to be converted: engine (x,y,z)
