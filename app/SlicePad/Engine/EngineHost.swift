@@ -64,6 +64,14 @@ final class EngineHost: @unchecked Sendable {
     func loadProfile(at url: URL) async throws -> LoadedProfile {
         try await perform { engine in
             try engine.loadProfile(at: url)
+
+            // The bed arrives with the profile, so a model opened before it could
+            // not be placed at the time. Nothing else would revisit that, and the
+            // symptom is a slice refused for a model the app appears to have put
+            // down properly.
+            if Self.isOffBed(engine) {
+                try? engine.arrange()
+            }
             return LoadedProfile(version: engine.profileVersion,
                                  settings: Overrides(from: engine.resolvedConfig()))
         }
