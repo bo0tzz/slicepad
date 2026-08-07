@@ -1,0 +1,28 @@
+# Actually build the JPEG dependency.
+#
+# libslic3r calls find_package(JPEG REQUIRED), and deps/CMakeLists.txt populates
+# JPEG_PKG exactly as it does PNG's and Expat's — but never adds it to the list
+# the "deps" target depends on. So dep_JPEG is configured and never built.
+#
+# It stayed hidden because every desktop has a system or Homebrew libjpeg for
+# find_package to land on. An iOS sysroot has none, so the engine fails to
+# configure there, and the macOS build was quietly depending on the runner image.
+#
+# Deletable once upstream lists it.
+
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -483,6 +483,12 @@
+     dep_CGAL
+     ${FREETYPE_PKG}
+     ${PNG_PKG}
++    # libslic3r does find_package(JPEG REQUIRED), and JPEG_PKG is populated above
++    # in exactly the way PNG's and Expat's are, but it was never listed here — so
++    # dep_JPEG is configured and never built. Every desktop has a system libjpeg
++    # for find_package to land on, which is why this stayed hidden; an iOS sysroot
++    # does not, and there it fails at configure time.
++    ${JPEG_PKG}
+     ${ZLIB_PKG}
+     ${EXPAT_PKG}
+     dep_libnoise

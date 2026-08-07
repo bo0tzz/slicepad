@@ -50,6 +50,19 @@ jobs:
             -I build/module \
             $(find app/SlicePad -name '*.swift')
 
+      # Type checking cannot tell whether the parsing is right, and these are the
+      # parts with a wrong answer rather than a compile error: a profile's settings
+      # read into the controls, and a typed address turned into a URL. They touch
+      # neither the engine nor a screen, so they compile and run natively here
+      # rather than needing a simulator.
+      - name: Run the app's logic checks
+        run: |
+          swiftc -o build/appchecks \
+            app/SlicePad/Engine/Settings.swift \
+            app/SlicePad/Engine/Moonraker.swift \
+            app/Tests/checks.swift
+          ./build/appchecks
+
   # macOS rather than Linux: Linux is covered by developing on it, whereas this
   # is the only place Apple's clang, ld64 and SDK are exercised — where the
   # portability bugs turned up — and the only place the gates can run on an
