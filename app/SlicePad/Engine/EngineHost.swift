@@ -13,6 +13,11 @@ struct PlateGeometry {
     /// UI a hundred times during a slice, and comparing a few hundred thousand
     /// floats to discover nothing moved is its own kind of waste.
     var revision = 0
+
+    /// Bumped only when a different model is loaded. The camera follows this, not
+    /// `revision`: it should frame a newly opened part, but must not snap back to
+    /// its default every time a slider moves the one you are already looking at.
+    var modelGeneration = 0
 }
 
 /// Serialises access to the engine, which is single-threaded per instance, and

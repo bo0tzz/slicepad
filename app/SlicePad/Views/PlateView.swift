@@ -52,8 +52,9 @@ struct PlateView: UIViewRepresentable {
             }
         }
 
-        if !context.coordinator.hasFramed, let bounds = geometry.bounds {
-            context.coordinator.hasFramed = true
+        if context.coordinator.framedGeneration != geometry.modelGeneration,
+           let bounds = geometry.bounds {
+            context.coordinator.framedGeneration = geometry.modelGeneration
             frameCamera(view, bed: geometry.bed, bounds: bounds)
         }
     }
@@ -67,7 +68,7 @@ struct PlateView: UIViewRepresentable {
         }
 
         var state: State?
-        var hasFramed = false
+        var framedGeneration: Int?
     }
 
     // MARK: Nodes
@@ -130,9 +131,15 @@ struct PlateView: UIViewRepresentable {
 
     private func frameCamera(_ view: SCNView, bed: [SIMD2<Float>],
                              bounds: (min: SIMD3<Float>, max: SIMD3<Float>)) {
+        // Replacing rather than adding: this runs again for each model opened, and
+        // scene roots accumulate whatever you hang off them.
+        view.scene?.rootNode.childNode(withName: "camera", recursively: false)?
+            .removeFromParentNode()
+
         let camera = SCNCamera()
         camera.zFar = 5000
         let node = SCNNode()
+        node.name = "camera"
         node.camera = camera
 
         let centre = (bounds.min + bounds.max) / 2

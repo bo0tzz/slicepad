@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
 
     private var host: EngineHost?
     private var cancelFlag = CancelFlag()
+    private var modelGeneration = 0
 
     var canSlice: Bool { profileName != nil && modelName != nil && !isSlicing }
     var engineVersion: String { Engine.version }
@@ -83,6 +84,7 @@ final class AppModel: ObservableObject {
     func loadModel(_ url: URL) {
         run { host in
             self.repairedErrors = try await host.loadModel(at: url)
+            self.modelGeneration += 1
             self.modelName = url.lastPathComponent
             self.scale = 100
             self.rotateZ = 0
@@ -199,6 +201,7 @@ final class AppModel: ObservableObject {
         guard let host else { return }
         var fresh = await host.geometry(includeToolpath: display == .layers)
         fresh.revision = geometry.revision + 1
+        fresh.modelGeneration = modelGeneration
         geometry = fresh
     }
 
