@@ -141,7 +141,7 @@ final class AppModel: ObservableObject {
                 self.gcodeURL = output
                 self.display = .layers
                 await self.refreshGeometry()
-            } catch let error as EngineError where error.code == SP_ERR_CANCELLED {
+            } catch let error as EngineError where error.isCancellation {
                 self.stage = "Cancelled"
             }
         }

@@ -3,24 +3,21 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var model = AppModel()
-    @State private var importing: ImportKind?
 
     /// Setting the profile and opening a model are separate actions on purpose:
     /// both arrive as .3mf, and guessing which one you meant from the file would be
-    /// wrong exactly when it matters.
-    enum ImportKind: Identifiable {
-        case profile, model
-        var id: Int { self == .profile ? 0 : 1 }
+    /// wrong exactly when it matters. Two flags rather than one enum, so the
+    /// completion handler cannot read a selection that dismissal has already
+    /// cleared.
+    @State private var importingProfile = false
+    @State private var importingModel = false
 
-        var types: [UTType] {
-            switch self {
-            case .profile: return [UTType(filenameExtension: "3mf") ?? .data]
-            case .model: return [UTType(filenameExtension: "3mf") ?? .data,
-                                 UTType(filenameExtension: "stl") ?? .data,
-                                 UTType(filenameExtension: "obj") ?? .data]
-            }
-        }
-    }
+    private static let threeMF = UTType(filenameExtension: "3mf") ?? .data
+    private static let modelTypes = [
+        threeMF,
+        UTType(filenameExtension: "stl") ?? .data,
+        UTType(filenameExtension: "obj") ?? .data,
+    ]
 
     var body: some View {
         NavigationStack {
@@ -34,10 +31,10 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Profile", systemImage: "slider.horizontal.3") { importing = .profile }
+                    Button("Profile", systemImage: "slider.horizontal.3") { importingProfile = true }
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Open Model", systemImage: "cube") { importing = .model }
+                    Button("Open Model", systemImage: "cube") { importingModel = true }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Picker("View", selection: $model.display) {
@@ -49,13 +46,13 @@ struct ContentView: View {
                 }
             }
         }
-        .fileImporter(isPresented: Binding(get: { importing != nil },
-                                          set: { if !$0 { importing = nil } }),
-                      allowedContentTypes: importing?.types ?? [.data]) { result in
-            let kind = importing
-            importing = nil
-            guard case let .success(url) = result else { return }
-            if kind == .profile { model.loadProfile(url) } else { model.loadModel(url) }
+        .fileImporter(isPresented: $importingProfile,
+                      allowedContentTypes: [Self.threeMF]) { result in
+            if case let .success(url) = result { model.loadProfile(url) }
+        }
+        .fileImporter(isPresented: $importingModel,
+                      allowedContentTypes: Self.modelTypes) { result in
+            if case let .success(url) = result { model.loadModel(url) }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.error != nil },
                                                             set: { if !$0 { model.error = nil } })) {

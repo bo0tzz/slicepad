@@ -5,6 +5,10 @@ struct EngineError: LocalizedError {
     let code: sp_result
     let message: String
     var errorDescription: String? { message }
+
+    /// Asked about often enough, and by code that has no business importing the C
+    /// module — cancelling is a normal outcome, not a failure to report.
+    var isCancellation: Bool { code == SP_ERR_CANCELLED }
 }
 
 /// Statistics from the last slice. The engine reports these as JSON; the shape is
