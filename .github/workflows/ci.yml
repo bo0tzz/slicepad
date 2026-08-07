@@ -262,7 +262,8 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local" \
-            -DCMAKE_FIND_ROOT_PATH="$PWD/build/deps-prefix/usr/local"
+            -DCMAKE_FIND_ROOT_PATH="$PWD/build/deps-prefix/usr/local" \
+            -DCMAKE_MACOSX_BUNDLE=OFF
           cmake --build build/iossim --target slicepad-gate --parallel 4
 
       - name: Boot a simulator
@@ -278,7 +279,13 @@ jobs:
       # platform against the same fixtures and the same reference G-code.
       - name: Run the gates in the simulator
         run: |
-          xcrun simctl spawn "$SIM_UDID" "$PWD/build/iossim/slicepad-gate" \
+          # CMake makes executables app bundles on iOS unless told otherwise —
+          # the same default that made Qhull fail to configure — so accept either
+          # shape rather than depending on the flag above having worked.
+          gate="$PWD/build/iossim/slicepad-gate"
+          [ -x "$gate" ] || gate="$PWD/build/iossim/slicepad-gate.app/slicepad-gate"
+          test -x "$gate" || { echo "no gate binary was produced"; exit 1; }
+          xcrun simctl spawn "$SIM_UDID" "$gate" \
             "$PWD/testdata" "$PWD/build/iossim/gate-work"
 
       # The xcframework has to be built for the simulator too: an app built for
