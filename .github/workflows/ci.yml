@@ -89,19 +89,6 @@ jobs:
         run: |
           find build/deps -name config.log -print -exec cat {} \; || true
 
-      # Building the engine, not running it: the gates need a simulator or a
-      # device, which is a later step. This proves libslic3r and the core compile
-      # and link for the target.
-      - name: Build the engine for iOS
-        run: |
-          cmake -S . -B build/ios -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local"
-          cmake --build build/ios --target slicepad_core --parallel 4
-
       - name: Build the engine and harness
         run: |
           cmake -S . -B build/ci -G Ninja \
@@ -179,3 +166,15 @@ jobs:
         if: failure()
         run: |
           find build/deps -name config.log -print -exec cat {} \; || true
+      # Building the engine, not running it: the gates need a simulator or a
+      # device, which is a later step. This proves libslic3r and the core compile
+      # and link for the target.
+      - name: Build the engine for iOS
+        run: |
+          cmake -S . -B build/ios -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local"
+          cmake --build build/ios --target slicepad_core --parallel 4

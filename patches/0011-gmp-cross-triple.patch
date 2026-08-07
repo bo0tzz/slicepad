@@ -13,9 +13,12 @@
 # iOS also needs -miphoneos-version-min and the iPhoneOS sysroot, and MPFR — which
 # reuses GMP's flags and triple — must not pass a bare --host= from the Linux
 # cross convention TOOLCHAIN_PREFIX, which is never set on Apple.
-
+# A cross build also needs a compiler for the build machine itself: GMP compiles
+# and runs generator programs during its own build, and CC carries an iOS
+# sysroot, so configure stopped at "Cannot find a build system compiler".
+#
 diff --git a/deps/GMP/GMP.cmake b/deps/GMP/GMP.cmake
-index b3ba1817..cab72dc3 100644
+index b3ba1817..0a109488 100644
 --- a/deps/GMP/GMP.cmake
 +++ b/deps/GMP/GMP.cmake
 @@ -24,21 +24,44 @@ else ()
@@ -69,6 +72,31 @@ index b3ba1817..cab72dc3 100644
          else ()
              set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
              set(_gmp_build_tgt "--build=${_gmp_build_arch}-apple-darwin")
+@@ -59,13 +82,23 @@ else ()
+         set(_cross_compile_arg --host=${TOOLCHAIN_PREFIX})
+     endif ()
+ 
++    # A real cross build needs two compilers: CC for the target, and one that
++    # produces binaries the build machine can run — GMP builds and runs generator
++    # programs during its own build. CC carries an iOS sysroot, so configure's
++    # fallback of reusing it fails and it stops at "Cannot find a build system
++    # compiler". The host's own clang is the right tool and takes no flags from us.
++    set(_gmp_build_cc "")
++    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++        set(_gmp_build_cc "CC_FOR_BUILD=/usr/bin/clang")
++    endif ()
++
+     ExternalProject_Add(dep_GMP
+         URL https://github.com/SoftFever/OrcaSlicer_deps/releases/download/gmp-6.2.1/gmp-6.2.1.tar.bz2
+         URL_HASH SHA256=eae9326beb4158c386e39a356818031bd28f3124cf915f8c5b1dc4c7a36b4d7c
+         DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/GMP
+         PATCH_COMMAND git apply ${GMP_DIRECTORY_FLAG} --verbose ${CMAKE_CURRENT_LIST_DIR}/0001-GMP_GCC15.patch
+         BUILD_IN_SOURCE ON
+-        CONFIGURE_COMMAND  env "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${DESTDIR}" ${_gmp_build_tgt}
++        CONFIGURE_COMMAND  env ${_gmp_build_cc} "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}" "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${DESTDIR}" ${_gmp_build_tgt}
+         BUILD_COMMAND     make -j
+         INSTALL_COMMAND   make install
+     )
 diff --git a/deps/MPFR/MPFR.cmake b/deps/MPFR/MPFR.cmake
 index 755a7699..9df288f4 100644
 --- a/deps/MPFR/MPFR.cmake
