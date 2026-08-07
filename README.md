@@ -9,8 +9,14 @@ Desktop Orca is involved once, to author the profile.
 
 ## Status
 
-The engine works and is verified against real inputs. Everything builds for the
-iPad and CI publishes an installable app; nothing has been run on a device yet.
+The engine works and is verified against real inputs, including on an iOS
+platform. There is an installable app; nothing has been run on physical hardware.
+
+Install it by adding this source to SideStore, or from the releases page:
+
+```
+https://raw.githubusercontent.com/bo0tzz/slicepad/main/sidestore.json
+```
 
 - **Done**: headless libslic3r, the C ABI, auto-orient, arrange, overrides,
   cancellation, slice statistics, G-code thumbnails, and the geometry a plate view
@@ -23,14 +29,18 @@ iPad and CI publishes an installable app; nothing has been run on a device yet.
   SwiftUI app compile and link for arm64-iOS, and every run publishes an unsigned
   `.ipa` — see `docs/sideloading.md`. CI checks the bundle is what it claims:
   arm64, the iOS platform, the engine actually in the binary, resources present.
-- **Written, not yet run**: the app — plate view, the three overrides, slicing
-  with progress and cancellation, and the Moonraker upload. Type checked against
-  the iOS SDK on every push, and its parsing is checked by running it, but no
-  part of it has executed on a device.
+- **Runs on iOS**: the same thirteen gates pass inside an iPad simulator, and the
+  app itself loads a profile, places a raw mesh export and completes a slice
+  there. G-code from an arm64 build is equivalent rather than identical to the
+  desktop's — extrusions within 1% — which is what the architecture note below
+  predicts.
+- **Written, not yet used**: the app — plate view, the three overrides, slicing
+  with progress and cancellation, and the Moonraker upload. Every layer of it is
+  checked by something, but nobody has operated it.
 
-The gap that remains is the important one: the engine is compiled for iOS and
-verified on macOS arm64 — same compiler, same architecture — but has never run on
-an iOS platform. Building the gates for the simulator would close most of it.
+Two gaps remain, both needing a person: nothing has run on physical hardware, and
+nothing has been printed from this engine's output. The second is the one worth
+respecting — a slicer's failure mode is a ruined print, not an error dialog.
 
 One finding qualifies what this can promise: byte-identical G-code is a property
 of identical code generation rather than of the engine, so the iPad will produce
