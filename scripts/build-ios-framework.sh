@@ -6,17 +6,24 @@
 # engine bump. Merging them into one archive keeps the app project's link line to a
 # single entry; overlinking costs nothing because the final link dead-strips.
 #
-# Device only. Sideloading targets a real iPad, and a simulator slice would mean
-# building the whole dependency set a second time.
+# SLICEPAD_SDK picks the platform: iphoneos (default) or iphonesimulator. They
+# are different Apple platforms rather than variants of one, so each needs its own
+# dependency prefix and produces its own archive — an app built for the simulator
+# cannot link the device slice.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build="$root/build/ios"
+sdk="${SLICEPAD_SDK:-iphoneos}"
+case "$sdk" in
+    iphoneos)        build="$root/build/ios" ;;
+    iphonesimulator) build="$root/build/iossim-fw" ;;
+    *) echo "SLICEPAD_SDK must be iphoneos or iphonesimulator, not '$sdk'" >&2; exit 2 ;;
+esac
 stage="$root/build/ios-framework"
 prefix="$root/build/deps-prefix/usr/local"
 
 if [[ ! -d "$prefix" ]]; then
-    echo "No iOS dependency prefix at $prefix — run 'mise run deps' for iOS first." >&2
+    echo "No dependency prefix at $prefix — run 'mise run deps' for $sdk first." >&2
     exit 1
 fi
 
@@ -26,6 +33,7 @@ cmake -S "$root" -B "$build" -G Ninja \
     -DCMAKE_SYSTEM_PROCESSOR=arm64 \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+    -DCMAKE_OSX_SYSROOT="$sdk" \
     -DCMAKE_PREFIX_PATH="$prefix" \
     -DCMAKE_FIND_ROOT_PATH="$prefix"
 cmake --build "$build" --target slicepad_core --parallel "${NPROC:-4}"

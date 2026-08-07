@@ -281,10 +281,15 @@ jobs:
           xcrun simctl spawn "$SIM_UDID" "$PWD/build/iossim/slicepad-gate" \
             "$PWD/testdata" "$PWD/build/iossim/gate-work"
 
+      # The xcframework has to be built for the simulator too: an app built for
+      # one Apple platform cannot link an archive built for another, and the
+      # default here is the device.
       - name: Build the app for the simulator
         env:
           NPROC: 4
+          SLICEPAD_SDK: iphonesimulator
         run: |
+          ./scripts/build-ios-framework.sh
           mise run app-project
           xcodebuild -project app/SlicePad.xcodeproj -scheme SlicePad \
             -destination "generic/platform=iOS Simulator" -configuration Release \
