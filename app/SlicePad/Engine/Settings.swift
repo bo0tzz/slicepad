@@ -3,7 +3,7 @@ import Foundation
 // Split out from Engine.swift because none of it touches the engine: these are
 // the values that cross between a profile, the controls and a slice. Keeping them
 // free of the C module is what lets them be tested by running them — see
-// app/Tests, which compiles this file natively and checks the parsing.
+// app/Tests/main.swift, which compiles this file natively and checks the parsing.
 
 struct SliceStats: Decodable {
     let estimated_seconds: Double

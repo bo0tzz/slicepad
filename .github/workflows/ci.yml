@@ -60,7 +60,7 @@ jobs:
           swiftc -o build/appchecks \
             app/SlicePad/Engine/Settings.swift \
             app/SlicePad/Engine/Moonraker.swift \
-            app/Tests/checks.swift
+            app/Tests/main.swift
           ./build/appchecks
 
   # macOS rather than Linux: Linux is covered by developing on it, whereas this
