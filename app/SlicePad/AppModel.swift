@@ -158,8 +158,9 @@ final class AppModel: ObservableObject {
     @Published var isSending = false
 
     func send(to address: String, apiKey: String, startPrint: Bool) {
-        guard let gcode = gcodeURL, let url = URL(string: address) else {
-            error = "That printer address is not a URL."
+        guard let gcode = gcodeURL else { return }
+        guard let url = Moonraker.address(from: address) else {
+            error = "\"\(address)\" is not an address I can reach."
             return
         }
 

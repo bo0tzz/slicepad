@@ -13,6 +13,16 @@ struct Moonraker {
     var apiKey: String?
     var root = "gcodes"
 
+    /// "sv08.local" is what someone types; without a scheme URL parses it as a path
+    /// and every request fails for a reason that has nothing to do with the printer.
+    static func address(from typed: String) -> URL? {
+        let trimmed = typed.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        let withScheme = trimmed.contains("://") ? trimmed : "http://\(trimmed)"
+        guard let url = URL(string: withScheme), url.host != nil else { return nil }
+        return url
+    }
+
     struct UploadResult {
         /// Path the server assigned, relative to `root`. Starting the print uses
         /// this rather than the name we sent, since the server may have changed it.
