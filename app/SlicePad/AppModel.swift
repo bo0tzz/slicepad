@@ -149,6 +149,46 @@ final class AppModel: ObservableObject {
 
     func cancelSlice() { cancelFlag.isSet = true }
 
+    // MARK: Printer
+
+    @Published var sendState: String?
+    @Published var isSending = false
+
+    func send(to address: String, apiKey: String, startPrint: Bool) {
+        guard let gcode = gcodeURL, let url = URL(string: address) else {
+            error = "That printer address is not a URL."
+            return
+        }
+
+        let name = (modelName.map { ($0 as NSString).deletingPathExtension } ?? "slicepad") + ".gcode"
+        let printer = Moonraker(host: url, apiKey: apiKey.isEmpty ? nil : apiKey)
+
+        isSending = true
+        sendState = "Connecting"
+        Task {
+            defer { isSending = false }
+            guard await printer.reachable() else {
+                isSending = false
+                error = "Could not reach the printer at \(address)."
+                sendState = nil
+                return
+            }
+            do {
+                sendState = "Uploading"
+                let result = try await printer.upload(gcode, as: name)
+                if startPrint {
+                    try await printer.startPrint(path: result.path)
+                    sendState = "Printing \(result.path)"
+                } else {
+                    sendState = "Uploaded \(result.path)"
+                }
+            } catch {
+                self.error = error.localizedDescription
+                sendState = nil
+            }
+        }
+    }
+
     private func refreshGeometry() async {
         guard let host else { return }
         geometry = await host.geometry(includeToolpath: display == .layers)

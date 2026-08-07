@@ -24,7 +24,7 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 plate
                 Divider()
-                Inspector(model: model, importing: $importing)
+                Inspector(model: model, importingProfile: $importingProfile)
                     .frame(width: 320)
             }
             .navigationTitle("SlicePad")
