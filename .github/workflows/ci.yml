@@ -341,8 +341,12 @@ jobs:
 
       - name: Launch the app normally
         run: |
-          xcrun simctl launch "$SIM_UDID" me.bo0tzz.slicepad
-          sleep 10
+          # With a model preloaded, so the screenshot shows the plate rather than
+          # the empty state — the 3D view is the part no other check can see.
+          container=$(xcrun simctl get_app_container "$SIM_UDID" me.bo0tzz.slicepad data)
+          SIMCTL_CHILD_SLICEPAD_PRELOAD="$container/Documents/fixtures" \
+            xcrun simctl launch "$SIM_UDID" me.bo0tzz.slicepad
+          sleep 15
           xcrun simctl spawn "$SIM_UDID" launchctl list | grep -q me.bo0tzz.slicepad \
             || { echo "the app is no longer running — it died during start-up"; exit 1; }
           echo "app still running after 10s"

@@ -73,6 +73,16 @@ struct ContentView: View {
             case .model: model.loadModel(url)
             }
         }
+        // Same hook as the smoke test, for the same reason and with the same
+        // reach: a sandboxed app cannot set its own environment, so this is dead
+        // code on a device. It exists so a screenshot can show the plate with a
+        // model on it — the 3D view is the one part nothing else can check.
+        .task {
+            guard let fixtures = ProcessInfo.processInfo.environment["SLICEPAD_PRELOAD"] else { return }
+            let directory = URL(fileURLWithPath: fixtures)
+            model.loadProfile(directory.appendingPathComponent("model.3mf"))
+            model.loadModel(directory.appendingPathComponent("model-shapr3d.3mf"))
+        }
         .alert("Something went wrong", isPresented: Binding(get: { model.error != nil },
                                                             set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) {}
