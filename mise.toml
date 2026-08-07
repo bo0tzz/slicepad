@@ -69,6 +69,7 @@ dir = "{{config_root}}/app"
 run = """xcodebuild -project SlicePad.xcodeproj -scheme SlicePad \
     -destination 'generic/platform=iOS' -configuration Release \
     -derivedDataPath {{config_root}}/build/dd \
+    MARKETING_VERSION=${MARKETING_VERSION:-0.0.0} \
     CODE_SIGNING_ALLOWED=NO build"""
 
 [tasks.ipa]

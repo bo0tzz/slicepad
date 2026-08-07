@@ -37,3 +37,31 @@ The app is iPad-only. It asks for two files, separately: a profile — a project
 `.3mf` saved from desktop Orca — and a model. Both come in through the document
 picker, so they can live in iCloud Drive, on the device, or anywhere else Files
 can reach, including Shapr3D's own export.
+
+## Through SideStore's source list
+
+Once a release exists, add this to SideStore under **Sources → +**:
+
+```
+https://raw.githubusercontent.com/bo0tzz/slicepad/main/sidestore.json
+```
+
+SlicePad then appears in the source and installs like any other app, and later
+releases show up as updates rather than needing another manual `.ipa`.
+
+The source file is written by `scripts/update-source.py` during the release
+workflow and committed back to `main`, so what SideStore reads is always the
+file in the repository. Each entry carries the `.ipa`'s size and SHA-256, which
+SideStore checks against what it downloaded.
+
+## Cutting a release
+
+Push a tag:
+
+```sh
+git tag v0.0.1 && git push origin v0.0.1
+```
+
+That builds the app, verifies the bundle, attaches `SlicePad.ipa` to a GitHub
+release, and adds the version to `sidestore.json`. `MARKETING_VERSION` comes from
+the tag, so the version the app reports cannot drift from the one released.

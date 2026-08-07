@@ -1,0 +1,141 @@
+name: release
+
+# Tag-driven: pushing v0.0.1 builds the app and publishes it, and updates the
+# SideStore source so an installed copy sees the update without anyone editing
+# JSON by hand.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, without the leading v (e.g. 0.0.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publishing $version"
+
+      - name: Point the toolchain at an SDK
+        run: echo "SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+
+      - name: Install autotools
+        run: brew install autoconf automake libtool texinfo
+
+      - name: Fetch and patch the engine
+        run: mise run fetch
+
+      - name: Fingerprint the dependency sources
+        id: deps-fp
+        run: |
+          hash=$(find third_party/orcaslicer/deps -type f -print0 \
+                 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      # Shares the key that ci.yml writes, so a release does not repeat an hour of
+      # dependency building that has already been done for the same recipes.
+      - name: Restore dependency build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-prefix
+            build/deps
+            build/dl-cache
+          key: deps-ios-arm64-${{ steps.deps-fp.outputs.hash }}-
+          restore-keys: |
+            deps-ios-arm64-${{ steps.deps-fp.outputs.hash }}-
+
+      - name: Build dependencies
+        run: mise run deps
+        env:
+          ORCA_DEPS_NPROC: 4
+          DEPS_CMAKE_EXTRA: >-
+            -DCMAKE_SYSTEM_NAME=iOS
+            -DCMAKE_SYSTEM_PROCESSOR=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+
+      # The version reaches the app through the generated Info.plist, so what the
+      # tag says and what the installed app reports cannot drift apart.
+      - name: Build the app
+        env:
+          NPROC: 4
+          MARKETING_VERSION: ${{ steps.version.outputs.version }}
+        run: mise run ipa
+
+      - name: Check the built app
+        run: |
+          app=build/dd/Build/Products/Release-iphoneos/SlicePad.app
+          test -x "$app/SlicePad"
+          [ "$(lipo -archs "$app/SlicePad")" = "arm64" ]
+          vtool -show-build "$app/SlicePad" | grep -q "platform IOS"
+          strings "$app/SlicePad" | grep -q "Generating perimeters"
+          test -d "$app/orca-resources"
+          plutil -extract CFBundleShortVersionString raw "$app/Info.plist"
+
+      - name: Update the SideStore source
+        run: |
+          python3 scripts/update-source.py \
+            --version "${{ steps.version.outputs.version }}" \
+            --ipa build/SlicePad.ipa \
+            --repo "${{ github.repository }}"
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: SlicePad ${{ steps.version.outputs.version }}
+          files: build/SlicePad.ipa
+          generate_release_notes: true
+          body: |
+            Unsigned build for sideloading. Add the source to SideStore:
+
+            ```
+            https://raw.githubusercontent.com/${{ github.repository }}/main/sidestore.json
+            ```
+
+            Or install `SlicePad.ipa` below directly.
+
+            This build has not been run on real hardware by its author. It slices
+            with OrcaSlicer 2.4.2 using a project `.3mf` exported from desktop
+            Orca — see the README for how to make one.
+
+      # Committed rather than published from the workflow's own output, so the
+      # source file in the repository is always the one SideStore is reading.
+      - name: Commit the updated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          python3 scripts/update-source.py \
+            --version "${{ steps.version.outputs.version }}" \
+            --ipa build/SlicePad.ipa \
+            --repo "${{ github.repository }}"
+          if ! git diff --quiet sidestore.json; then
+            git add sidestore.json
+            git commit -m "Add ${{ steps.version.outputs.version }} to the SideStore source"
+            git push origin main
+          fi
