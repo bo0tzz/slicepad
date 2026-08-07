@@ -21,6 +21,7 @@ targets:
       # libslic3r only requires the resources directory to exist.
       - path: Resources/orca-resources
         type: folder
+      - path: Resources/Assets.xcassets
     dependencies:
       - framework: ../build/SlicePadCore.xcframework
         embed: false
@@ -35,6 +36,7 @@ targets:
         # synthesises, and it only does that when asked. Without this the app links
         # and then fails validation with no Info.plist at all.
         GENERATE_INFOPLIST_FILE: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
         INFOPLIST_KEY_UILaunchScreen_Generation: true
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-

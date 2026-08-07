@@ -59,6 +59,10 @@ def main() -> None:
                     "bundleIdentifier": "me.bo0tzz.slicepad",
                     "developerName": args.repo.split("/")[0],
                     "subtitle": "OrcaSlicer's engine, on an iPad.",
+                    "iconURL": (
+                        f"https://raw.githubusercontent.com/{args.repo}/main/"
+                        "app/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+                    ),
                     "localizedDescription": DESCRIPTION,
                     "versions": [],
                 }
