@@ -47,3 +47,25 @@ run = [
 ]
 sources = ["patches/*.patch"]
 outputs = ["build/deps-prefix/usr/local/lib/libtbb.a"]
+
+[tasks.framework]
+description = "Package the engine as build/SlicePadCore.xcframework (macOS, iOS deps required)"
+run = "./scripts/build-ios-framework.sh"
+
+[tasks.app-project]
+description = "Generate app/SlicePad.xcodeproj from project.yml"
+# Pinned per task rather than in [tools]: xcodegen has no Linux build, and engine
+# work happens on Linux, where `mise install` should stay clean.
+tools = { xcodegen = "2.44.1" }
+dir = "{{config_root}}/app"
+run = "xcodegen generate"
+sources = ["app/project.yml"]
+outputs = ["app/SlicePad.xcodeproj/project.pbxproj"]
+
+[tasks.app]
+description = "Build the iPad app (unsigned)"
+depends = ["framework", "app-project"]
+dir = "{{config_root}}/app"
+run = """xcodebuild -project SlicePad.xcodeproj -scheme SlicePad \
+    -destination 'generic/platform=iOS' -configuration Release \
+    CODE_SIGNING_ALLOWED=NO build"""

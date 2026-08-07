@@ -1,0 +1,177 @@
+import Foundation
+import SlicePadCore
+
+struct EngineError: LocalizedError {
+    let code: sp_result
+    let message: String
+    var errorDescription: String? { message }
+}
+
+/// Statistics from the last slice. The engine reports these as JSON; the shape is
+/// mirrored here rather than passed around as a dictionary so a view can bind to it.
+struct SliceStats: Decodable {
+    let estimated_seconds: Double
+    let filament_mm: Double
+    let filament_grams: Double
+    let layer_count: Int
+    let travel_mm: Double
+    let object_count: Int
+
+    var formattedTime: String {
+        let total = Int(estimated_seconds.rounded())
+        let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60)
+        return h > 0 ? "\(h)h \(m)m" : (m > 0 ? "\(m)m \(s)s" : "\(s)s")
+    }
+}
+
+/// The three things this app lets you change. Everything else comes from the
+/// profile you authored in desktop Orca.
+struct Overrides: Equatable {
+    var wallLoops: Int = 2
+    var infillPercent: Int = 15
+    var supports: Bool = false
+
+    /// A fragment of an Orca preset, which is what `sp_set_overrides` consumes —
+    /// so these keys are Orca's own names, not an encoding of ours.
+    var json: String {
+        """
+        {"wall_loops": "\(wallLoops)", \
+        "sparse_infill_density": "\(infillPercent)%", \
+        "enable_support": "\(supports ? 1 : 0)"}
+        """
+    }
+}
+
+/// A box for the slice progress callback. A C function pointer cannot capture, so
+/// the closure travels through the `user` pointer instead.
+private final class ProgressBox {
+    let onProgress: (Int, String) -> Bool
+    init(_ onProgress: @escaping (Int, String) -> Bool) { self.onProgress = onProgress }
+}
+
+private func progressThunk(percent: Int32, stage: UnsafePointer<CChar>?, user: UnsafeMutableRawPointer?) -> Int32 {
+    guard let user else { return 0 }
+    let box = Unmanaged<ProgressBox>.fromOpaque(user).takeUnretainedValue()
+    let text = stage.map { String(cString: $0) } ?? ""
+    return box.onProgress(Int(percent), text) ? 0 : 1
+}
+
+/// Swift face of the C ABI. Not thread safe: one engine belongs to one queue, and
+/// `slice` is the only call meant to run off the main one.
+final class Engine {
+    private let handle: OpaquePointer
+
+    init() throws {
+        let resources = Bundle.main.resourceURL!.appendingPathComponent("orca-resources")
+        let data = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: true
+        ).appendingPathComponent("engine")
+        try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+
+        guard let handle = sp_engine_create(resources.path, data.path) else {
+            throw EngineError(code: SP_ERR_STATE, message: "The slicing engine would not start.")
+        }
+        self.handle = handle
+    }
+
+    deinit { sp_engine_destroy(handle) }
+
+    static var version: String { String(cString: sp_engine_version()) }
+    static var configVersion: String { String(cString: sp_engine_config_version()) }
+
+    private func check(_ result: sp_result) throws {
+        guard result != SP_OK else { return }
+        throw EngineError(code: result, message: String(cString: sp_last_error(handle)))
+    }
+
+    // MARK: Profile
+
+    func loadProfile(at url: URL) throws {
+        try withSecurityScope(url) { try check(sp_load_config(handle, $0.path)) }
+    }
+
+    /// Empty when the profile records no version. A mismatch against
+    /// `Engine.configVersion` is a caution, not an error: libslic3r migrates.
+    var profileVersion: String { String(cString: sp_config_source_version(handle)) }
+
+    // MARK: Model
+
+    func loadModel(at url: URL) throws {
+        try withSecurityScope(url) { try check(sp_load_model(handle, $0.path)) }
+    }
+
+    var objectCount: Int { Int(sp_object_count(handle)) }
+    var repairedErrors: Int { Int(sp_model_repaired_errors(handle)) }
+
+    func setTransform(object: Int = 0, scale: Double, rotateX: Double, rotateY: Double,
+                      rotateZ: Double, translateX: Double, translateY: Double) throws {
+        try check(sp_set_transform(handle, Int32(object), scale, rotateX, rotateY,
+                                   rotateZ, translateX, translateY))
+    }
+
+    func autoOrient() throws { try check(sp_auto_orient(handle)) }
+    func arrange() throws { try check(sp_arrange(handle)) }
+
+    // MARK: Slicing
+
+    func setOverrides(_ overrides: Overrides) throws {
+        try check(sp_set_overrides(handle, overrides.json))
+    }
+
+    /// Blocks. `onProgress` returns false to cancel, and is called on this thread.
+    func slice(to url: URL, onProgress: @escaping (Int, String) -> Bool) throws {
+        let box = ProgressBox(onProgress)
+        let user = Unmanaged.passUnretained(box).toOpaque()
+        try check(sp_slice(handle, url.path, progressThunk, user))
+    }
+
+    var stats: SliceStats? {
+        let json = String(cString: sp_slice_stats_json(handle))
+        return try? JSONDecoder().decode(SliceStats.self, from: Data(json.utf8))
+    }
+
+    // MARK: Geometry
+
+    /// Triangles in bed millimetres, three vertices each, transforms applied.
+    func meshTriangles() -> [SIMD3<Float>] {
+        let count = sp_mesh_triangle_count(handle)
+        guard count > 0, let base = sp_mesh_vertices(handle) else { return [] }
+        return (0 ..< count * 3).map { i in
+            SIMD3(base[i * 3], base[i * 3 + 1], base[i * 3 + 2])
+        }
+    }
+
+    /// The printable area outline from the profile, as x,y pairs.
+    func bedOutline() -> [SIMD2<Float>] {
+        let count = sp_bed_point_count(handle)
+        guard count > 0, let base = sp_bed_points(handle) else { return [] }
+        return (0 ..< count).map { SIMD2(base[$0 * 2], base[$0 * 2 + 1]) }
+    }
+
+    /// Extruding moves from the last slice as line segment endpoints — already in
+    /// the form a vertex buffer wants, which is what makes the layer view cheap.
+    func toolpathSegments() -> [SIMD3<Float>] {
+        let count = sp_toolpath_segment_count(handle)
+        guard count > 0, let base = sp_toolpath_segments(handle) else { return [] }
+        return (0 ..< count * 2).map { i in
+            SIMD3(base[i * 3], base[i * 3 + 1], base[i * 3 + 2])
+        }
+    }
+
+    func objectBounds(object: Int = 0) -> (min: SIMD3<Float>, max: SIMD3<Float>)? {
+        var values = [Float](repeating: 0, count: 6)
+        guard sp_object_bounds(handle, Int32(object), &values) == SP_OK else { return nil }
+        return (SIMD3(values[0], values[1], values[2]), SIMD3(values[3], values[4], values[5]))
+    }
+
+    // MARK: -
+
+    /// Files chosen through the document picker live outside the sandbox, and the
+    /// engine opens them by path — so the scope has to be held across the call.
+    private func withSecurityScope(_ url: URL, _ body: (URL) throws -> Void) throws {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        try body(url)
+    }
+}

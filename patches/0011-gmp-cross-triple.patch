@@ -18,7 +18,7 @@
 # sysroot, so configure stopped at "Cannot find a build system compiler".
 #
 diff --git a/deps/GMP/GMP.cmake b/deps/GMP/GMP.cmake
-index b3ba1817..0a109488 100644
+index b3ba1817..74e751fa 100644
 --- a/deps/GMP/GMP.cmake
 +++ b/deps/GMP/GMP.cmake
 @@ -24,21 +24,44 @@ else ()
@@ -72,7 +72,7 @@ index b3ba1817..0a109488 100644
          else ()
              set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
              set(_gmp_build_tgt "--build=${_gmp_build_arch}-apple-darwin")
-@@ -59,13 +82,23 @@ else ()
+@@ -59,13 +82,31 @@ else ()
          set(_cross_compile_arg --host=${TOOLCHAIN_PREFIX})
      endif ()
  
@@ -80,10 +80,18 @@ index b3ba1817..0a109488 100644
 +    # produces binaries the build machine can run — GMP builds and runs generator
 +    # programs during its own build. CC carries an iOS sysroot, so configure's
 +    # fallback of reusing it fails and it stops at "Cannot find a build system
-+    # compiler". The host's own clang is the right tool and takes no flags from us.
++    # compiler".
++    #
++    # The macOS sysroot has to be named explicitly rather than left to the driver:
++    # an iOS build sets SDKROOT in the environment, which clang honours, so a bare
++    # clang here still produces iOS binaries and configure rejects it in turn with
++    # "Specified CC_FOR_BUILD doesn't seem to work". -isysroot outranks SDKROOT.
 +    set(_gmp_build_cc "")
 +    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
-+        set(_gmp_build_cc "CC_FOR_BUILD=/usr/bin/clang")
++        execute_process(COMMAND xcrun --sdk macosx --show-sdk-path
++                        OUTPUT_VARIABLE _macos_sdk
++                        OUTPUT_STRIP_TRAILING_WHITESPACE)
++        set(_gmp_build_cc "CC_FOR_BUILD=/usr/bin/clang -isysroot ${_macos_sdk}")
 +    endif ()
 +
      ExternalProject_Add(dep_GMP

@@ -1,0 +1,45 @@
+# Generated into an .xcodeproj by XcodeGen (`mise run app-project`).
+#
+# The project file is not committed: it is a build artifact of this file, and a
+# checked-in .xcodeproj is the kind of thing that drifts silently when there is no
+# Mac in the inner loop to notice.
+name: SlicePad
+options:
+  bundleIdPrefix: org.futo
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+targets:
+  SlicePad:
+    type: application
+    platform: iOS
+    sources:
+      - path: SlicePad
+      # A folder reference, so the engine can be handed a directory path. It is
+      # empty on purpose: profiles arrive fully resolved from a saved project, and
+      # libslic3r only requires the resources directory to exist.
+      - path: Resources/orca-resources
+        type: folder
+    dependencies:
+      - framework: ../build/SlicePadCore.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.futo.slicepad
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
+          UIInterfaceOrientationPortrait
+          UIInterfaceOrientationPortraitUpsideDown
+          UIInterfaceOrientationLandscapeLeft
+          UIInterfaceOrientationLandscapeRight
+        TARGETED_DEVICE_FAMILY: 2   # iPad
+        SWIFT_VERSION: "5.9"
+        # The engine is C++; without this the Swift target links the C ABI but not
+        # the standard library the implementation behind it needs.
+        CLANG_CXX_LIBRARY: libc++
+        OTHER_LDFLAGS: -lc++ -lz
+        # Documents come in through the picker, which is why there is no file
+        # sharing here: nothing is meant to live inside the app.
+        SWIFT_STRICT_CONCURRENCY: complete

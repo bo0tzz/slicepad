@@ -7,3 +7,6 @@ deps/prefix/
 
 # The reference G-code is a committed fixture, not build output.
 !testdata/*.gcode
+
+# Generated from app/project.yml by `mise run app-project`.
+app/SlicePad.xcodeproj/
