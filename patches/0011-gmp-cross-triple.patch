@@ -18,10 +18,10 @@
 # sysroot, so configure stopped at "Cannot find a build system compiler".
 #
 diff --git a/deps/GMP/GMP.cmake b/deps/GMP/GMP.cmake
-index b3ba1817..74e751fa 100644
+index b3ba1817..bc98050d 100644
 --- a/deps/GMP/GMP.cmake
 +++ b/deps/GMP/GMP.cmake
-@@ -24,21 +24,44 @@ else ()
+@@ -24,21 +24,54 @@ else ()
      set(_gmp_build_tgt "${CMAKE_SYSTEM_PROCESSOR}")
  
      if (APPLE)
@@ -65,14 +65,24 @@ index b3ba1817..74e751fa 100644
 +            # gmp-6.2.1 accepts -apple-ios, so the platform makes them differ
 +            # honestly rather than by fudging the architecture.
 +            if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
-+                set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-ios)
++                # --disable-assembly is the price of that honest triple. GMP selects
++                # its aarch64 assembly's relocation syntax from the host OS, and
++                # "ios" matches none of its *-darwin* patterns, so it emits the ELF
++                # form — "adrp x7, :got:sym" — which the Mach-O assembler rejects
++                # with "ADR/ADRP relocations must be GOT relative".
++                #
++                # The generic C is slower at bignum arithmetic, which here means
++                # CGAL's exact predicates rather than anything in the slicing hot
++                # path. Removable if GMP learns the iOS triple, or by teaching its
++                # m4 that this is still Mach-O.
++                set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-ios --disable-assembly)
 +            else ()
 +                set(_gmp_build_tgt --build=${_gmp_build_arch}-apple-darwin --host=${_gmp_host_arch}-apple-darwin)
 +            endif ()
          else ()
              set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
              set(_gmp_build_tgt "--build=${_gmp_build_arch}-apple-darwin")
-@@ -59,13 +82,31 @@ else ()
+@@ -59,13 +92,31 @@ else ()
          set(_cross_compile_arg --host=${TOOLCHAIN_PREFIX})
      endif ()
  
