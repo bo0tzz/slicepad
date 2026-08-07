@@ -25,7 +25,8 @@ cmake -S "$root" -B "$build" -G Ninja \
     -DCMAKE_SYSTEM_NAME=iOS \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-    -DCMAKE_PREFIX_PATH="$prefix"
+    -DCMAKE_PREFIX_PATH="$prefix" \
+    -DCMAKE_FIND_ROOT_PATH="$prefix"
 cmake --build "$build" --target slicepad_core --parallel "${NPROC:-4}"
 
 rm -rf "$stage"

@@ -230,7 +230,8 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local"
+            -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local" \
+            -DCMAKE_FIND_ROOT_PATH="$PWD/build/deps-prefix/usr/local"
           cmake --build build/ios --target slicepad_core --parallel 4
 
       # The app link is the only thing that proves the ABI is actually reachable
