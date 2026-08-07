@@ -118,9 +118,17 @@ jobs:
 
             Or install `SlicePad.ipa` below directly.
 
-            This build has not been run on real hardware by its author. It slices
-            with OrcaSlicer 2.4.2 using a project `.3mf` exported from desktop
-            Orca — see the README for how to make one.
+            It slices with OrcaSlicer 2.4.2, driven by a project `.3mf` exported
+            from desktop Orca — see the README for how to make one.
+
+            **What has been checked**: thirteen correctness gates compare the
+            engine's output against G-code sliced by desktop Orca, and they pass
+            on Linux, on macOS arm64, and inside an iPad simulator. The app itself
+            loads a profile, places a raw mesh export and completes a slice in
+            that simulator.
+
+            **What has not**: no part of this has run on physical hardware, and
+            nothing has been printed from its output.
 
       # Committed rather than published from the workflow's own output, so the
       # source file in the repository is always the one SideStore is reading.
