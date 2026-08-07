@@ -43,6 +43,7 @@ final class AppModel: ObservableObject {
     private var host: EngineHost?
     private var cancelFlag = CancelFlag()
     private var modelGeneration = 0
+    private var transformToken = 0
 
     var canSlice: Bool { profileName != nil && modelName != nil && !isSlicing }
     var engineVersion: String { Engine.version }
@@ -114,7 +115,15 @@ final class AppModel: ObservableObject {
     }
 
     func applyTransform() {
+        // Each tap of a stepper starts a Task, and Tasks are not guaranteed to run
+        // in the order they were created — so a slower one carrying an older scale
+        // could land after a newer one and leave the model at a value the controls
+        // no longer show. Only the most recent request is worth performing.
+        transformToken += 1
+        let token = transformToken
+
         run { host in
+            guard token == self.transformToken else { return }
             try await host.setScaleAndRotation(scale: self.scale / 100, rotateZ: self.rotateZ)
             await self.refreshGeometry()
         }
