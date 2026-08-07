@@ -215,6 +215,16 @@ jobs:
       # from Swift — type checking sees the header and stops there. Unsigned:
       # signing belongs to whoever sideloads it.
       - name: Build the app
-        run: mise run app
+        run: mise run ipa
         env:
           NPROC: 4
+
+      # The delivery path: SideStore signs with the installing device's own
+      # certificate, so an unsigned .ipa is what it wants.
+      - name: Keep the app
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SlicePad-unsigned-ipa
+          path: build/SlicePad.ipa
+          if-no-files-found: error

@@ -68,4 +68,19 @@ depends = ["framework", "app-project"]
 dir = "{{config_root}}/app"
 run = """xcodebuild -project SlicePad.xcodeproj -scheme SlicePad \
     -destination 'generic/platform=iOS' -configuration Release \
+    -derivedDataPath {{config_root}}/build/dd \
     CODE_SIGNING_ALLOWED=NO build"""
+
+[tasks.ipa]
+description = "Package the built app as an unsigned .ipa for sideloading"
+depends = ["app"]
+# Unsigned on purpose: SideStore signs with the installing device's own
+# certificate, and an .ipa is a zip with the .app under Payload/ — there is no
+# packaging step beyond that worth a tool.
+run = [
+    "rm -rf build/Payload build/SlicePad.ipa",
+    "mkdir -p build/Payload",
+    "cp -R build/dd/Build/Products/Release-iphoneos/SlicePad.app build/Payload/",
+    "cd build && zip -qry SlicePad.ipa Payload",
+    "rm -rf build/Payload",
+]
