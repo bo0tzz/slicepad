@@ -9,10 +9,9 @@
 # clang and -arch rather than a toolchain prefix, so the Linux branch asks for a
 # --cross-compile-prefix that does not exist.
 diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
-index bdabf189..1858ee29 100644
 --- a/deps/CMakeLists.txt
 +++ b/deps/CMakeLists.txt
-@@ -131,7 +131,17 @@ if (APPLE)
+@@ -131,7 +131,17 @@
      endif ()
      set(CMAKE_FIND_FRAMEWORK LAST)
      set(CMAKE_FIND_APPBUNDLE LAST)
@@ -34,7 +33,7 @@ index bdabf189..1858ee29 100644
 diff --git a/deps/OpenSSL/OpenSSL.cmake b/deps/OpenSSL/OpenSSL.cmake
 --- a/deps/OpenSSL/OpenSSL.cmake
 +++ b/deps/OpenSSL/OpenSSL.cmake
-@@ -22,7 +22,14 @@
+@@ -22,7 +22,21 @@
      set(_make_cmd nmake)
      set(_install_cmd nmake install_sw )
  else()
@@ -44,13 +43,20 @@ diff --git a/deps/OpenSSL/OpenSSL.cmake b/deps/OpenSSL/OpenSSL.cmake
 +        # builds its sysroot out of CROSS_TOP and CROSS_SDK — unset, so it emits
 +        # "-isysroot /SDKs/" and every file fails to find a header. Naming the
 +        # sysroot outright is both simpler and independent of Xcode's layout.
-+        set(_conf_cmd ./Configure -isysroot ${CMAKE_OSX_SYSROOT}
-+                                  -mios-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET})
++        #
++        # The simulator carries a different Mach-O platform id, so it needs its own
++        # minimum-version flag: built with the device one, nothing will link.
++        if (CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
++            set(_openssl_min_version -mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET})
++        else ()
++            set(_openssl_min_version -mios-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET})
++        endif ()
++        set(_conf_cmd ./Configure -isysroot ${CMAKE_OSX_SYSROOT} ${_openssl_min_version})
 +    elseif(APPLE)
          set(_conf_cmd export MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET} && ./Configure -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET})
      else()
          set(_conf_cmd env "CC=${CMAKE_C_COMPILER}" "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" "./config")
-@@ -30,12 +37,19 @@
+@@ -30,12 +44,25 @@
      set(_cross_comp_prefix_line "")
      set(_make_cmd make -j${NPROC})
      set(_install_cmd make -j${NPROC} install_sw)
@@ -60,7 +66,13 @@ diff --git a/deps/OpenSSL/OpenSSL.cmake b/deps/OpenSSL/OpenSSL.cmake
 +        # prefix, and OpenSSL has a target of its own for this. Without the branch
 +        # an iOS build falls into the Linux one below and asks for a prefix that
 +        # does not exist.
-+        set(_cross_arch "ios64-cross")
++        # OpenSSL keeps a separate target for the simulator, which differs from
++        # the device one in the compiler it drives.
++        if (CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
++            set(_cross_arch "iossimulator-xcrun")
++        else ()
++            set(_cross_arch "ios64-cross")
++        endif ()
 +        set(_cross_comp_prefix_line "")
 +    elseif (CMAKE_CROSSCOMPILING)
          set(_cross_comp_prefix_line "--cross-compile-prefix=${TOOLCHAIN_PREFIX}-")

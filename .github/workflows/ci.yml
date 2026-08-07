@@ -179,6 +179,134 @@ jobs:
           path: build/ci/gate-work/*.gcode
           if-no-files-found: warn
 
+  # The only place any of this actually runs on an iOS platform. The device job
+  # proves it compiles and links; this proves the engine still slices correctly
+  # there, and that the app survives its own launch.
+  #
+  # A separate dependency build, because the simulator is a third Apple platform
+  # rather than a flavour of the device: different sysroot, different Mach-O
+  # platform id, and objects built for one will not link against the other.
+  ios-simulator:
+    name: ios-simulator
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point the toolchain at an SDK
+        run: echo "SDKROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+
+      - name: Install autotools
+        run: brew install autoconf automake libtool texinfo
+
+      - name: Fetch and patch the engine
+        run: mise run fetch
+
+      - name: Check the patch stack reproduces the checkout
+        run: mise run check-patches
+
+      - name: Fingerprint the dependency sources
+        id: deps-fp
+        run: |
+          hash=$(find third_party/orcaslicer/deps -type f -print0 \
+                 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Restore dependency build
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-prefix
+            build/deps
+            build/dl-cache
+          key: deps-iossim-arm64-${{ steps.deps-fp.outputs.hash }}-${{ github.run_id }}
+          restore-keys: |
+            deps-iossim-arm64-${{ steps.deps-fp.outputs.hash }}-
+
+      - name: Build dependencies for the simulator
+        run: mise run deps
+        env:
+          ORCA_DEPS_NPROC: 4
+          DEPS_CMAKE_EXTRA: >-
+            -DCMAKE_SYSTEM_NAME=iOS
+            -DCMAKE_SYSTEM_PROCESSOR=arm64
+            -DCMAKE_OSX_ARCHITECTURES=arm64
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -DCMAKE_OSX_SYSROOT=iphonesimulator
+
+      - name: Collect configure logs
+        if: failure()
+        run: find build/deps -name config.log -print -exec cat {} + || true
+
+      - name: Save dependency build
+        if: always() && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/deps-prefix
+            build/deps
+            build/dl-cache
+          key: deps-iossim-arm64-${{ steps.deps-fp.outputs.hash }}-${{ github.run_id }}
+
+      - name: Build the gates for the simulator
+        run: |
+          cmake -S . -B build/iossim -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_PROCESSOR=arm64 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_PREFIX_PATH="$PWD/build/deps-prefix/usr/local" \
+            -DCMAKE_FIND_ROOT_PATH="$PWD/build/deps-prefix/usr/local"
+          cmake --build build/iossim --target slicepad-gate --parallel 4
+
+      - name: Boot a simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j \
+                 | jq -r '[.devices[][] | select(.isAvailable)][0].udid')
+          test -n "$udid" || { echo "no simulator available"; exit 1; }
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+
+      # The whole point: the same thirteen gates the desktop passes, run on an iOS
+      # platform against the same fixtures and the same reference G-code.
+      - name: Run the gates in the simulator
+        run: |
+          xcrun simctl spawn "$SIM_UDID" "$PWD/build/iossim/slicepad-gate" \
+            "$PWD/testdata" "$PWD/build/iossim/gate-work"
+
+      - name: Build the app for the simulator
+        env:
+          NPROC: 4
+        run: |
+          mise run app-project
+          xcodebuild -project app/SlicePad.xcodeproj -scheme SlicePad \
+            -destination "generic/platform=iOS Simulator" -configuration Release \
+            -derivedDataPath build/dd-sim CODE_SIGNING_ALLOWED=NO build
+
+      # Launching is the only check that the app survives start-up: creating the
+      # engine, finding the resources inside the bundle and the first call across
+      # the C ABI all happen before anything is drawn.
+      - name: Launch the app
+        run: |
+          app=build/dd-sim/Build/Products/Release-iphonesimulator/SlicePad.app
+          xcrun simctl install "$SIM_UDID" "$app"
+          xcrun simctl launch "$SIM_UDID" me.bo0tzz.slicepad
+          sleep 10
+          xcrun simctl spawn "$SIM_UDID" launchctl list | grep -q me.bo0tzz.slicepad \
+            || { echo "the app is no longer running — it died during start-up"; exit 1; }
+          echo "app still running after 10s"
+
+      - name: Keep the crash reports
+        if: failure()
+        run: find ~/Library/Logs/DiagnosticReports -name 'SlicePad*' -exec cat {} + || true
+
   # The actual target: the dependency set, libslic3r, the C ABI and the app all
   # built for arm64-iOS, packaged as an unsigned .ipa.
   #
