@@ -101,9 +101,11 @@ There is no Mac in the inner loop, which shapes everything:
    and SDK, and runs the same gates. iOS then adds only cross-compilation on top
    of a target already known good.
 
-`tests/gate.cpp` is the safety net: ten gates covering config resolution, G-code
-equality, statistics, toolpath and plate geometry, the override controls,
-cancellation, transforms and the failure paths. Plain C++ over the C ABI with no
+`tests/gate.cpp` is the safety net: eleven gates covering config resolution,
+G-code equality, statistics, toolpath and plate geometry, the override controls,
+cancellation, transforms, thumbnails and the failure paths. The suite also checks
+that eleven of them reported, because a deleted test otherwise looks exactly like
+a passing one. Plain C++ over the C ABI with no
 platform dependencies, so the same source runs on an Apple target later. Both
 `ctest` and the binary directly take a fixtures directory and a working directory.
 
@@ -112,9 +114,12 @@ computed by the code under test. That has repeatedly caught the oracle being wro
 rather than the engine — worth knowing before trusting a failure.
 
 Building with clang as well as gcc found two real portability defects (patch 0006
-and the `nanosvg`/`tbbmalloc` notes in `CMakeLists.txt`) and produced
-**byte-identical G-code**, so output does not depend on the compiler. If a build
-ever disagrees with the reference, suspect the build.
+and the `nanosvg`/`tbbmalloc` notes in `CMakeLists.txt`), and both produce
+byte-identical G-code on x86-64 — but that is a narrower result than it first
+appears. Output *does* depend on code generation: building the same source for
+`x86-64-v3`, where the compiler vectorises differently, changes the G-code, and the
+slicer's thresholds turn sub-ulp differences into whole millimetres. So gate 2 asks
+for byte equality only on the architecture the reference came from.
 
 ## Licence
 
