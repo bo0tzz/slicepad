@@ -22,9 +22,11 @@ not run on a device, because the iOS build is not finished.
 - **Written, not yet run**: the SwiftUI app — plate view, the three overrides,
   slicing with progress and cancellation, and the Moonraker upload. CI type checks
   it against the iOS SDK on every push, which catches everything except linking.
-- **In progress**: the iOS cross-compile. The dependency set is most of the way
-  through; each failure so far has come from the superbuild assuming the target
-  architecture is the host's.
+- **In progress**: the iOS cross-compile. All 105 dependencies now build for
+  arm64-iOS; what remains is configuring and compiling the engine itself against
+  them, and linking it into the app. `docs/ios-cross-compile.md` records the
+  pattern, since every failure so far has been the build system assuming the
+  target is the machine it is running on.
 
 One finding qualifies what this can promise: byte-identical G-code is a property
 of identical code generation rather than of the engine, so the iPad will produce

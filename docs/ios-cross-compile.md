@@ -47,6 +47,35 @@ from it:
   iOS, and generic C for bignum arithmetic — which here is CGAL's exact
   predicates, not the slicing hot path.
 
+## Things that are about the platform, not the architecture
+
+Once the triples were right, the remaining failures were all of one kind: a
+setting that is correct for macOS and meaningless or wrong for iOS.
+
+- **App bundles.** CMake makes every executable a bundle on iOS. Several
+  dependencies build command-line tools and install them with only a runtime
+  destination, so they fail to configure with "no BUNDLE DESTINATION". Qhull hits
+  it first; PNG, JPEG and Expat would each hit it in turn, so
+  `CMAKE_MACOSX_BUNDLE=OFF` is set once for all sub-builds.
+- **OpenSSL's sysroot.** Its `ios64-cross` target composes `-isysroot` from
+  `CROSS_TOP` and `CROSS_SDK`. Unset, that becomes the literal `/SDKs/`, and every
+  file fails to find a header while the configure step reports success. Naming the
+  sysroot outright avoids depending on Xcode's directory layout as well.
+- **Where find_package looks.** An iOS toolchain confines searches to the sysroot,
+  so a dependency prefix that a native build finds through `CMAKE_PREFIX_PATH` is
+  invisible. It has to be named in `CMAKE_FIND_ROOT_PATH` too.
+
+## The same bug, four times
+
+`list(FIND CMAKE_OSX_ARCHITECTURES ${CMAKE_SYSTEM_PROCESSOR} ...)` appears in both
+`deps/CMakeLists.txt` and the engine's own root `CMakeLists.txt`. Fixing the first
+(patch 0010) left the second to be discovered later, by which point the whole
+dependency set had to build before configuration could even reach it.
+
+The lesson recorded below — grep for the class, not the instance — was written
+after the second occurrence and still did not prevent the fourth, because the
+grep was scoped to `deps/`. Widen the search to the whole tree.
+
 ## What this costs, and what to do about it
 
 Each round trip is a CI build of a long dependency chain, and a fix only reveals
