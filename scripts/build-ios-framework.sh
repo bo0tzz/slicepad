@@ -31,8 +31,12 @@ cmake --build "$build" --target slicepad_core --parallel "${NPROC:-4}"
 rm -rf "$stage"
 mkdir -p "$stage/Headers"
 
-# Every archive the build produced, plus every one it linked against.
-mapfile -t archives < <(find "$build" "$prefix/lib" -name '*.a' | sort -u)
+# Every archive the build produced, plus every one it linked against. Read in a
+# loop rather than with mapfile, which macOS's bash 3.2 does not have.
+archives=()
+while IFS= read -r archive; do
+    archives+=("$archive")
+done < <(find "$build" "$prefix/lib" -name '*.a' | sort -u)
 echo "Merging ${#archives[@]} archives"
 libtool -static -o "$stage/libslicepad.a" "${archives[@]}" 2>/dev/null
 
