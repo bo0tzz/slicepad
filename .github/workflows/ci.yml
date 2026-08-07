@@ -9,6 +9,38 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The app's own feedback loop, and deliberately independent of the engine build:
+  # type checking needs the C ABI's header and nothing behind it, so Swift mistakes
+  # surface in a couple of minutes instead of after an hour of dependencies. It
+  # cannot catch link errors, which is what the iOS job is for.
+  app:
+    name: swift-typecheck
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the C module the app imports
+        run: |
+          mkdir -p build/module
+          cp core/include/slicepad.h build/module/
+          cat > build/module/module.modulemap <<'MAP'
+          module SlicePadCore {
+              header "slicepad.h"
+              export *
+          }
+          MAP
+
+      # Same target triple the app is built for, so SwiftUI and SceneKit resolve to
+      # the iOS SDK rather than the macOS one.
+      - name: Type check the app
+        run: |
+          xcrun --sdk iphoneos swiftc -typecheck \
+            -target arm64-apple-ios17.0 \
+            -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -strict-concurrency=complete \
+            -I build/module \
+            $(find app/SlicePad -name '*.swift')
+
   # macOS rather than Linux: Linux is covered by developing on it, whereas this
   # is the only place Apple's clang, ld64 and SDK are exercised — where the
   # portability bugs turned up — and the only place the gates can run on an
