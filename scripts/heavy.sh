@@ -38,13 +38,30 @@ else
 fi
 
 if systemd-run --user --scope --quiet -- true >/dev/null 2>&1; then
-    exec systemd-run --user --scope --quiet --collect \
+    # Named so the exit can be explained. When the budget is hit the kernel kills a
+    # compiler inside the cgroup, and the build tool reports that as something else
+    # entirely — ninja says "interrupted by user", which sends you looking for a
+    # stray Ctrl-C instead of at the memory cap that is doing its job.
+    scope="slicepad-heavy-$$"
+    set +e
+    systemd-run --user --scope --quiet --collect --unit="$scope" \
         -p MemoryHigh="$mem_high" \
         -p MemoryMax="$mem_max" \
         -p MemorySwapMax="$mem_swap_max" \
         -p CPUWeight="$weight" \
         -p IOWeight="$weight" \
         -- nice -n "$nice_level" "$@"
+    status=$?
+    set -e
+
+    if [ "$status" -ne 0 ] &&
+       journalctl --user -u "$scope.scope" -n 20 --no-pager 2>/dev/null | grep -q "oom-kill"; then
+        echo "heavy: the build hit its ${mem_max} budget and the kernel killed part of it." >&2
+        echo "heavy: this is the cap working, not a broken build. Either run fewer" >&2
+        echo "heavy: parallel jobs (-j4 rather than -j\$(nproc); LTO links are the" >&2
+        echo "heavy: expensive ones) or raise HEAVY_MEM_MAX if the machine has room." >&2
+    fi
+    exit "$status"
 fi
 
 echo "heavy: no usable systemd user scope; memory will not be capped" >&2
