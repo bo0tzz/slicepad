@@ -67,7 +67,9 @@ final class AppModel: ObservableObject {
 
     func loadProfile(_ url: URL) {
         run { host in
-            let version = try await host.loadProfile(at: url)
+            let profile = try await host.loadProfile(at: url)
+            let version = profile.version
+            self.overrides = profile.settings
             self.profileName = url.deletingPathExtension().lastPathComponent
             // A mismatch is normal — libslic3r migrates older profiles — so this is
             // worth showing but not worth blocking on.

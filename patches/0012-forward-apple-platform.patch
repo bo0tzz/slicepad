@@ -5,12 +5,13 @@
 # target. Architecture alone does not describe an Apple target, so every CMake
 # dependency built for macOS while the top level believed it was building for
 # iOS — and nothing failed to say so.
-
+# It also turns off app bundles: on iOS CMake makes every executable one, and
+# these dependencies install command-line tools with no bundle destination.
+#
 diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
-index 1858ee29..3f30a391 100644
 --- a/deps/CMakeLists.txt
 +++ b/deps/CMakeLists.txt
-@@ -149,6 +149,15 @@ if (APPLE)
+@@ -149,6 +149,21 @@
          set(CMAKE_CXX_COMPILER_ID "Clang")
          string(REPLACE ";" "$<SEMICOLON>" CMAKE_OSX_ARCHS "${CMAKE_OSX_ARCHITECTURES}")
          set(_cmake_osx_arch -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHS})
@@ -21,7 +22,13 @@ index 1858ee29..3f30a391 100644
 +            list(APPEND _cmake_osx_arch
 +                -DCMAKE_SYSTEM_NAME:STRING=${CMAKE_SYSTEM_NAME}
 +                -DCMAKE_OSX_SYSROOT:STRING=${CMAKE_OSX_SYSROOT}
-+                -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET})
++                -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET}
++                # On iOS, CMake makes every executable an app bundle by default.
++                # These dependencies build command-line tools and install them with
++                # only a runtime destination — Qhull, and the utilities shipped with
++                # PNG, JPEG and Expat — so each fails to configure with "no BUNDLE
++                # DESTINATION". Nothing here needs a bundle.
++                -DCMAKE_MACOSX_BUNDLE:BOOL=OFF)
 +        endif ()
          set(_cmake_args_osx_arch CMAKE_ARGS -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHS})
          message(STATUS "Detect Cross-compilation. Will build for target ${CMAKE_OSX_ARCHS}" )

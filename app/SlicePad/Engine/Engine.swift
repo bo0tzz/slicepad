@@ -35,6 +35,17 @@ struct Overrides: Equatable {
     var infillPercent: Int = 15
     var supports: Bool = false
 
+    /// Seeded from the loaded profile rather than from defaults of our own. These
+    /// are sent on every slice, so a control sitting at a value the profile never
+    /// asked for does not read as "unchanged" — it silently overrides.
+    init(from config: [String: String] = [:]) {
+        wallLoops = config["wall_loops"].flatMap(Int.init) ?? wallLoops
+        infillPercent = config["sparse_infill_density"]
+            .map { $0.replacingOccurrences(of: "%", with: "") }
+            .flatMap { Int($0) ?? Double($0).map(Int.init) } ?? infillPercent
+        supports = config["enable_support"].map { $0 == "1" || $0 == "true" } ?? supports
+    }
+
     /// A fragment of an Orca preset, which is what `sp_set_overrides` consumes —
     /// so these keys are Orca's own names, not an encoding of ours.
     var json: String {
@@ -98,6 +109,20 @@ final class Engine {
     /// Empty when the profile records no version. A mismatch against
     /// `Engine.configVersion` is a caution, not an error: libslic3r migrates.
     var profileVersion: String { String(cString: sp_config_source_version(handle)) }
+
+    /// The configuration the next slice would use, as the engine reports it — the
+    /// same "key = value" shape Orca embeds in its G-code.
+    func resolvedConfig() -> [String: String] {
+        let text = String(cString: sp_resolved_config_text(handle))
+        var config: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            guard let separator = line.firstIndex(of: "=") else { continue }
+            let key = line[..<separator].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+            config[key] = value
+        }
+        return config
+    }
 
     // MARK: Model
 

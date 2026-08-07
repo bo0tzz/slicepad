@@ -22,9 +22,16 @@ actor EngineHost {
 
     init() throws { engine = try Engine() }
 
-    func loadProfile(at url: URL) throws -> String {
+    struct LoadedProfile {
+        let version: String
+        /// What the profile already says, so the controls start where it left off.
+        let settings: Overrides
+    }
+
+    func loadProfile(at url: URL) throws -> LoadedProfile {
         try engine.loadProfile(at: url)
-        return engine.profileVersion
+        return LoadedProfile(version: engine.profileVersion,
+                             settings: Overrides(from: engine.resolvedConfig()))
     }
 
     func loadModel(at url: URL) throws -> Int {
