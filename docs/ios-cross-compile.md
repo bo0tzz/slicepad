@@ -65,6 +65,36 @@ setting that is correct for macOS and meaningless or wrong for iOS.
   so a dependency prefix that a native build finds through `CMAKE_PREFIX_PATH` is
   invisible. It has to be named in `CMAKE_FIND_ROOT_PATH` too.
 
+## What a static archive cannot carry
+
+The app links one merged `.a` built from every archive the engine produced and
+every one it linked against — 56 of them. That works for object files and for
+nothing else. Anything libslic3r resolves from the SDK has to be named again in
+the app's link flags, because there is no object code to merge:
+
+- system libraries (`-lexpat`, `-liconv`, `-lz`)
+- frameworks (`Foundation`, `ModelIO`, `Accelerate`)
+
+The engine's configure output is the reliable source for that list: every
+`Found X: …/iPhoneOS.sdk/…` line is something the merge will not bring along.
+Reading it once beats discovering the entries one link error at a time.
+
+## Host dependencies that iOS exposes
+
+Two libraries turned out to be satisfied by whatever the build machine happened
+to have, rather than by anything this project builds:
+
+- **JPEG** — `libslic3r` does `find_package(JPEG REQUIRED)` and the superbuild
+  defines `dep_JPEG` but never builds it (patch 0014). Every desktop has a system
+  libjpeg, so the omission was invisible; the macOS CI job was quietly linking
+  the runner image's copy.
+- **expat** — the superbuild calls `find_package(EXPAT)` and skips building its
+  own when one is found. The iOS SDK ships `libexpat.tbd`, so this one resolves
+  cleanly against the platform rather than against a host accident.
+
+The difference matters: the first was a bug that iOS revealed, the second is a
+platform library and correct to use.
+
 ## The same bug, four times
 
 `list(FIND CMAKE_OSX_ARCHITECTURES ${CMAKE_SYSTEM_PROCESSOR} ...)` appears in both
