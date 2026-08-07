@@ -293,10 +293,31 @@ jobs:
       # Launching is the only check that the app survives start-up: creating the
       # engine, finding the resources inside the bundle and the first call across
       # the C ABI all happen before anything is drawn.
-      - name: Launch the app
+      - name: Install the app
         run: |
-          app=build/dd-sim/Build/Products/Release-iphonesimulator/SlicePad.app
-          xcrun simctl install "$SIM_UDID" "$app"
+          xcrun simctl install "$SIM_UDID" \
+            build/dd-sim/Build/Products/Release-iphonesimulator/SlicePad.app
+
+      # Launching alone proves less than it looks like: the engine is created on
+      # the first profile or model load, so a clean start says nothing about
+      # sp_engine_create, the resources directory inside the bundle, or the
+      # writable path under Application Support. This drives a real slice through
+      # the app's own wiring, with the fixtures inside its sandbox container so
+      # the file access is the same as a real install.
+      - name: Slice inside the app
+        run: |
+          container=$(xcrun simctl get_app_container "$SIM_UDID" me.bo0tzz.slicepad data)
+          fixtures="$container/Documents/fixtures"
+          mkdir -p "$fixtures"
+          cp testdata/model.3mf testdata/model-shapr3d.3mf "$fixtures/"
+
+          output=$(xcrun simctl launch --console-pty --terminate-running-process \
+            --setenv SLICEPAD_SMOKE="$fixtures" "$SIM_UDID" me.bo0tzz.slicepad 2>&1 | tee /dev/stderr)
+          echo "$output" | grep -q "SMOKE OK" \
+            || { echo "the app could not slice"; exit 1; }
+
+      - name: Launch the app normally
+        run: |
           xcrun simctl launch "$SIM_UDID" me.bo0tzz.slicepad
           sleep 10
           xcrun simctl spawn "$SIM_UDID" launchctl list | grep -q me.bo0tzz.slicepad \
