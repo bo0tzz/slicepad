@@ -1,7 +1,11 @@
 name: ci
 
 on:
+  # Branches only. Without the filter this also fires for tags, so cutting a
+  # release started a second, identical run competing with the release build for
+  # the five macOS runners.
   push:
+    branches: ["**"]
   pull_request:
   # Normally redundant, since every iteration is a push. Added because during the
   # Actions outage of 2026-08-06 two pushes created no run at all, leaving a fix
