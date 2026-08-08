@@ -22,6 +22,35 @@ targets:
       - path: Resources/orca-resources
         type: folder
       - path: Resources/Assets.xcassets
+    # A written plist rather than the synthesised one: the App Transport Security
+    # exception is a nested dictionary, and INFOPLIST_KEY_* settings can only
+    # express flat values.
+    info:
+      path: SlicePad/Info.plist
+      properties:
+        CFBundleDisplayName: SlicePad
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Asked for the first time the app talks to a printer. Without this the
+        # system still prompts, but with no reason given — and the request that
+        # triggered the prompt fails, which reads as the printer being
+        # unreachable when nothing is wrong with it.
+        NSLocalNetworkUsageDescription:
+          SlicePad sends sliced G-code to a printer on your network.
+        # Moonraker on a home network speaks plain HTTP, which App Transport
+        # Security blocks by default. Scoped to local addresses rather than
+        # turning ATS off: nothing here should be reaching the internet.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+
     dependencies:
       - framework: ../build/SlicePadCore.xcframework
         embed: false
@@ -32,18 +61,6 @@ targets:
         # and what the installed app reports cannot drift apart.
         MARKETING_VERSION: "0.0.0"
         CURRENT_PROJECT_VERSION: "1"
-        # The INFOPLIST_KEY_* settings below are inputs to a plist Xcode
-        # synthesises, and it only does that when asked. Without this the app links
-        # and then fails validation with no Info.plist at all.
-        GENERATE_INFOPLIST_FILE: true
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
-        INFOPLIST_KEY_UILaunchScreen_Generation: true
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: >-
-          UIInterfaceOrientationPortrait
-          UIInterfaceOrientationPortraitUpsideDown
-          UIInterfaceOrientationLandscapeLeft
-          UIInterfaceOrientationLandscapeRight
         TARGETED_DEVICE_FAMILY: 2   # iPad
         SWIFT_VERSION: "5.9"
         # The engine is C++; without this the Swift target links the C ABI but not

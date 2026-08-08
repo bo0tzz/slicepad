@@ -152,8 +152,17 @@ struct Moonraker {
         } catch {
             // A wrong address arrives here rather than as a status code, and the
             // address is the thing worth naming when it does.
+            //
+            // So does the first request of the app's life: iOS raises the local
+            // network prompt and fails whatever provoked it, which reads as an
+            // unreachable printer on a printer that is fine. It succeeds on the
+            // next attempt, so the message says so rather than leaving someone to
+            // discover that by chance.
             throw Failure.unreachable(address: host.absoluteString,
-                                      reason: error.localizedDescription)
+                                      reason: error.localizedDescription
+                                          + " If this was the first time, iOS asked "
+                                          + "for permission to use the local network "
+                                          + "just now — try again.")
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
