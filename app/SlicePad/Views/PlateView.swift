@@ -1,5 +1,6 @@
 import SceneKit
 import SwiftUI
+import UIKit
 
 /// The plate: bed outline, the model as a solid, and after a slice the toolpath as
 /// stacked layers. SceneKit rather than RealityKit — this is a CAD-ish view of a
@@ -12,13 +13,10 @@ struct PlateView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.scene = SCNScene()
-        view.allowsCameraControl = true
         view.autoenablesDefaultLighting = true
         // Darker than the plate, so the bed reads as a surface sitting in space
         // rather than as an outline drawn on the background.
         view.backgroundColor = .systemGray5
-        view.defaultCameraController.interactionMode = .orbitTurntable
-        view.defaultCameraController.inertiaEnabled = true
 
         // Bed coordinates are Z-up; SceneKit is Y-up. One rotation on the root keeps
         // every buffer below it in the engine's own frame.
@@ -26,6 +24,35 @@ struct PlateView: UIViewRepresentable {
         root.eulerAngles.x = -.pi / 2
         root.name = "root"
         view.scene?.rootNode.addChildNode(root)
+
+        // SceneKit's own camera control is not used: its two-finger pan and its
+        // pinch are competing recognisers, so a one-handed pinch while panning is
+        // dropped, and its inertia throws the view across the plate on release.
+        view.allowsCameraControl = false
+        view.scene?.rootNode.addChildNode(context.coordinator.cameraNode)
+        view.pointOfView = context.coordinator.cameraNode
+        context.coordinator.view = view
+        context.coordinator.apply()
+
+        let orbit = UIPanGestureRecognizer(target: context.coordinator,
+                                           action: #selector(Coordinator.orbit(_:)))
+        orbit.maximumNumberOfTouches = 1
+        view.addGestureRecognizer(orbit)
+
+        let truck = UIPanGestureRecognizer(target: context.coordinator,
+                                           action: #selector(Coordinator.truck(_:)))
+        truck.minimumNumberOfTouches = 2
+        truck.maximumNumberOfTouches = 2
+        truck.delegate = context.coordinator
+        view.addGestureRecognizer(truck)
+        context.coordinator.truckGesture = truck
+
+        let dolly = UIPinchGestureRecognizer(target: context.coordinator,
+                                             action: #selector(Coordinator.dolly(_:)))
+        dolly.delegate = context.coordinator
+        view.addGestureRecognizer(dolly)
+        context.coordinator.dollyGesture = dolly
+
         return view
     }
 
@@ -54,32 +81,109 @@ struct PlateView: UIViewRepresentable {
             }
         }
 
-        // Each view answers a different question, so each frames differently: the
-        // model view is about where the part sits, which needs the bed; the layer
-        // view is about the print itself, where a whole 350mm bed would leave the
-        // layers a smudge in the middle. Re-framed when either changes.
-        let framing = Coordinator.Framing(generation: geometry.modelGeneration, display: display)
-        if context.coordinator.framing != framing, let bounds = geometry.bounds {
-            context.coordinator.framing = framing
-            frameCamera(view, bed: display == .model ? geometry.bed : [], bounds: bounds)
+        // Only a newly opened model reframes. Switching between the model and the
+        // layers is a change of what is drawn, not of what you are looking at, and
+        // moving the camera there throws away wherever the user had put it.
+        if context.coordinator.framedGeneration != geometry.modelGeneration,
+           let bounds = geometry.bounds {
+            context.coordinator.framedGeneration = geometry.modelGeneration
+            frameCamera(context.coordinator, bed: geometry.bed, bounds: bounds)
         }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator {
+    /// Owns the camera, which is a turntable: a target to look at, a distance from
+    /// it, and two angles. Every gesture moves one of those four and re-derives the
+    /// position, so no gesture can leave the camera somewhere the others cannot
+    /// reason about.
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         struct State: Equatable {
             let revision: Int
             let display: AppModel.Display
         }
 
-        struct Framing: Equatable {
-            let generation: Int
-            let display: AppModel.Display
+        var state: State?
+        var framedGeneration: Int?
+
+        weak var view: SCNView?
+        weak var truckGesture: UIPanGestureRecognizer?
+        weak var dollyGesture: UIPinchGestureRecognizer?
+
+        let cameraNode: SCNNode = {
+            let camera = SCNCamera()
+            camera.zFar = 5000
+            let node = SCNNode()
+            node.camera = camera
+            return node
+        }()
+
+        // Scene space, so the -90° root rotation is already accounted for: engine
+        // (x, y, z) is scene (x, z, -y).
+        var target = SIMD3<Float>(0, 0, 0)
+        var distance: Float = 400
+        var yaw: Float = -.pi / 4
+        var pitch: Float = 0.69
+
+        /// Radians per point dragged: a full turn takes about a thousand points,
+        /// which is a little over a screen width.
+        private let orbitSpeed: Float = 0.006
+
+        func apply() {
+            // Never quite flat and never over the top: past either the turntable
+            // stops making sense and look(at:) has no stable up vector.
+            pitch = min(max(pitch, 0.05), 1.5)
+            distance = min(max(distance, 10), 3000)
+
+            let horizontal = distance * cos(pitch)
+            cameraNode.simdPosition = target + SIMD3<Float>(horizontal * sin(yaw),
+                                                            distance * sin(pitch),
+                                                            horizontal * cos(yaw))
+            cameraNode.look(at: SCNVector3(target.x, target.y, target.z))
         }
 
-        var state: State?
-        var framing: Framing?
+        @objc func orbit(_ gesture: UIPanGestureRecognizer) {
+            guard let view else { return }
+            let movement = gesture.translation(in: view)
+            gesture.setTranslation(.zero, in: view)
+
+            yaw -= Float(movement.x) * orbitSpeed
+            pitch += Float(movement.y) * orbitSpeed
+            apply()
+        }
+
+        @objc func truck(_ gesture: UIPanGestureRecognizer) {
+            guard let view, view.bounds.height > 0 else { return }
+            let movement = gesture.translation(in: view)
+            gesture.setTranslation(.zero, in: view)
+
+            // Scaled so the plate keeps up with the fingers: at the target's depth
+            // this is how many millimetres one point of screen covers.
+            let fieldOfView = Float(cameraNode.camera?.fieldOfView ?? 60) * .pi / 180
+            let perPoint = 2 * distance * tan(fieldOfView / 2) / Float(view.bounds.height)
+
+            target += (cameraNode.simdWorldRight * -Float(movement.x)
+                       + cameraNode.simdWorldUp * Float(movement.y)) * perPoint
+            apply()
+        }
+
+        @objc func dolly(_ gesture: UIPinchGestureRecognizer) {
+            let scale = Float(gesture.scale)
+            gesture.scale = 1
+            guard scale > 0 else { return }
+
+            distance /= scale
+            apply()
+        }
+
+        // The two-finger gestures are one motion as far as a hand is concerned, so
+        // they have to be allowed to run together; the single-finger orbit stays
+        // exclusive, or a pinch would rotate the view as well.
+        func gestureRecognizer(_ gesture: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            (gesture === truckGesture && other === dollyGesture)
+                || (gesture === dollyGesture && other === truckGesture)
+        }
     }
 
     // MARK: Nodes
@@ -161,23 +265,12 @@ struct PlateView: UIViewRepresentable {
         return SCNNode(geometry: geometry)
     }
 
-    private func frameCamera(_ view: SCNView, bed: [SIMD2<Float>],
+    private func frameCamera(_ coordinator: Coordinator, bed: [SIMD2<Float>],
                              bounds: (min: SIMD3<Float>, max: SIMD3<Float>)) {
-        // Replacing rather than adding: this runs again for each model opened, and
-        // scene roots accumulate whatever you hang off them.
-        view.scene?.rootNode.childNode(withName: "camera", recursively: false)?
-            .removeFromParentNode()
-
-        let camera = SCNCamera()
-        camera.zFar = 5000
-        let node = SCNNode()
-        node.name = "camera"
-        node.camera = camera
-
         // Frame the bed, not the part. Framing the part put a 27mm object in the
         // middle of an empty view with one corner of a 350mm bed drifting past the
         // top edge — technically correct and useless, because the question a plate
-        // view answers is where the thing sits on the plate. Pinch still zooms in.
+        // view answers is where the thing sits on the plate. Pinch zooms in.
         var centre = (bounds.min + bounds.max) / 2
         var span = max(simd_reduce_max(bounds.max - bounds.min), 50)
         if !bed.isEmpty {
@@ -187,19 +280,12 @@ struct PlateView: UIViewRepresentable {
             centre = SIMD3((low.x + high.x) / 2, (low.y + high.y) / 2, centre.z)
             span = max(high.x - low.x, high.y - low.y)
         }
-        let distance = Double(span) * 1.15
 
-        // The camera hangs off the scene root, but the geometry sits under a node
-        // rotated to make Z up — so the target has to be converted: engine (x,y,z)
-        // becomes scene (x, z, -y).
-        let target = SCNVector3(centre.x, centre.z, -centre.y)
-
-        // Looking down from the front-left, roughly the desktop's default.
-        node.position = SCNVector3(Double(target.x) - distance * 0.6,
-                                   Double(target.y) + distance * 0.7,
-                                   Double(target.z) + distance * 0.6)
-        view.pointOfView = node
-        view.scene?.rootNode.addChildNode(node)
-        node.look(at: target)
+        coordinator.target = SIMD3<Float>(centre.x, centre.z, -centre.y)
+        coordinator.distance = span * 1.25
+        // Down from the front-left, roughly the desktop's default.
+        coordinator.yaw = -.pi / 4
+        coordinator.pitch = 0.69
+        coordinator.apply()
     }
 }
