@@ -126,8 +126,11 @@ bool render_mesh(const std::vector<float> &mesh, unsigned width, unsigned height
         for (int i = 0; i < 3; ++i) {
             const Projected p = view.apply(corner[i * 3], corner[i * 3 + 1], corner[i * 3 + 2]);
             v[i].x = offset_x + (p.x - min_x) * scale;
-            // Screen rows increase downwards while the view's y increases upwards.
-            v[i].y = float(height) - (offset_y + (p.y - min_y) * scale);
+            // Row 0 is the bottom of the picture, not the top. libslic3r's
+            // thumbnails come from glReadPixels, so its PNG encoder is told to
+            // flip what it is given; a buffer in screen order comes out of that
+            // upside down. Row index therefore rises with the view's y.
+            v[i].y = offset_y + (p.y - min_y) * scale;
             v[i].depth = p.depth;
         }
 

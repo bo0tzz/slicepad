@@ -51,6 +51,9 @@ target_link_libraries(slicepad-cli PRIVATE slicepad_core)
 # on the Linux dev machine and on the iOS Simulator in CI.
 add_executable(slicepad-gate tests/gate.cpp)
 target_link_libraries(slicepad-gate PRIVATE slicepad_core)
+# For thumbnail.hpp, which the thumbnail gate calls directly: which way up the
+# image is cannot be seen through the C ABI without decoding a PNG.
+target_include_directories(slicepad-gate PRIVATE core/src)
 
 enable_testing()
 add_test(NAME gates

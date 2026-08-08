@@ -11,6 +11,11 @@
 // Gate 2 slices the fixture mesh and compares every G/M command line in order.
 #include "slicepad.h"
 
+// The one exception to going through the C ABI. Thumbnail orientation is not
+// observable from the outside without a PNG decoder, and it was wrong in a
+// shipped build.
+#include "thumbnail.hpp"
+
 #include <algorithm>
 #include <filesystem>
 #include <cctype>
@@ -148,6 +153,10 @@ std::string line_containing(const std::string &text, const std::string &needle)
             return line;
     return {};
 }
+
+// Exactly what the app sends: the three controls it exposes, on every slice.
+const char *const kAppOverrides =
+    "{\"wall_loops\": \"3\", \"sparse_infill_density\": \"20%\", \"enable_support\": \"0\"}";
 
 // Every gate reports itself, and the total is checked at the end. Deleting a gate
 // otherwise looks exactly like it passing — which is how five of them once went
@@ -614,9 +623,49 @@ int main(int argc, char **argv)
                                                        std::to_string(theirs));
                     }
                 }
+                // Which way up they are, which the sizes above cannot see: the
+                // thumbnail shipped upside down for two releases because
+                // libslic3r's encoder flips whatever it is handed, expecting the
+                // OpenGL buffer the desktop gives it.
+                //
+                // Rendered directly rather than decoded back out of the G-code,
+                // which would mean a PNG decoder in here. A broad triangle lying on
+                // the bed and a thin spike standing above it: most of the ink is
+                // near the ground, so a correct bottom-up buffer is far denser in
+                // its low rows, and a flipped one fails this by a wide margin.
+                if (failures == 0) {
+                    const std::vector<float> ground_and_spike = {
+                        -20, -20, 0,   20, -20, 0,    0, 20,  0,
+                         -2,   0, 0,    2,   0, 0,    0,  0, 60,
+                    };
+                    std::vector<unsigned char> pixels;
+                    const unsigned side = 64;
+                    if (!slicepad::render_mesh(ground_and_spike, side, side, false, pixels)) {
+                        failures += fail("gate11", "the rasteriser drew nothing");
+                    } else {
+                        auto drawn_in = [&](unsigned from, unsigned to) {
+                            size_t n = 0;
+                            for (unsigned row = from; row < to; ++row)
+                                for (unsigned col = 0; col < side; ++col) {
+                                    const unsigned char *p = &pixels[(size_t(row) * side + col) * 4];
+                                    if (p[0] != 30 || p[1] != 30 || p[2] != 30)
+                                        ++n;
+                                }
+                            return n;
+                        };
+                        const size_t low = drawn_in(0, side / 2);
+                        const size_t high = drawn_in(side / 2, side);
+                        if (low <= high)
+                            failures += fail("gate11", "the thumbnail is upside down: " +
+                                                           std::to_string(low) + " pixels in the bottom "
+                                                           "half against " + std::to_string(high) +
+                                                           " in the top");
+                    }
+                }
+
                 if (failures == 0)
-                    reported("gate11"), std::printf("gate11 thumbnails: %zu embedded at the desktop's sizes\n",
-                                ours_sizes.size());
+                    reported("gate11"), std::printf("gate11 thumbnails: %zu embedded at the desktop's sizes, "
+                                "drawn the right way up\n", ours_sizes.size());
             }
         }
     }
@@ -802,9 +851,65 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 14: slicing twice without changing anything gives the same answer.
+    // Reported from a real device — the second slice emptied the statistics and the
+    // layer view fell back to the solid model, while auto-orient fixed it only when
+    // it actually moved the object.
+    //
+    // Both slices write to the same path on purpose, because that is what triggers
+    // it: libslic3r skips the export when its step is still done and a file is
+    // already sitting there, and the app slices to one fixed filename every time.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (probe == nullptr) {
+            failures += fail("gate14", "could not create an engine");
+        } else {
+            const std::string profile = fixtures + "/model.3mf";
+            const std::string mesh = fixtures + "/model-shapr3d.3mf";
+            const std::string path = work + "/twice.gcode";
+
+            if (sp_load_config(probe, profile.c_str()) != SP_OK ||
+                sp_load_model(probe, mesh.c_str()) != SP_OK ||
+                sp_auto_orient(probe) != SP_OK || sp_arrange(probe) != SP_OK) {
+                failures += fail("gate14", std::string("setup: ") + sp_last_error(probe));
+            } else if (sp_set_overrides(probe, kAppOverrides) != SP_OK ||
+                       sp_slice(probe, path.c_str(), nullptr, nullptr) != SP_OK) {
+                failures += fail("gate14", std::string("first slice: ") + sp_last_error(probe));
+            } else {
+                const std::string first_stats = sp_slice_stats_json(probe);
+                const size_t first_segments = sp_toolpath_segment_count(probe);
+                const std::string first_gcode = read_file(path);
+
+                if (sp_set_overrides(probe, kAppOverrides) != SP_OK ||
+                    sp_slice(probe, path.c_str(), nullptr, nullptr) != SP_OK) {
+                    failures += fail("gate14", std::string("second slice: ") + sp_last_error(probe));
+                } else {
+                    const std::string second_stats = sp_slice_stats_json(probe);
+                    if (second_stats != first_stats)
+                        failures += fail("gate14", "statistics changed on an unchanged re-slice:\n"
+                                                       "  first  " + first_stats + "\n"
+                                                       "  second " + second_stats);
+                    if (failures == 0 && sp_toolpath_segment_count(probe) != first_segments)
+                        failures += fail("gate14", "toolpath went from " +
+                                                       std::to_string(first_segments) + " segments to " +
+                                                       std::to_string(sp_toolpath_segment_count(probe)));
+                    // Commands rather than bytes: the header carries the time of
+                    // day, which differs between two slices seconds apart.
+                    if (failures == 0 && commands_of(read_file(path)) != commands_of(first_gcode))
+                        failures += fail("gate14", "the G-code itself differs between identical slices");
+                }
+                if (failures == 0)
+                    reported("gate14"), std::printf(
+                        "gate14 re-slice: identical stats and %zu toolpath segments both times\n",
+                        first_segments);
+            }
+            sp_engine_destroy(probe);
+        }
+    }
+
     sp_engine_destroy(engine);
 
-    constexpr int kExpectedGates = 13;
+    constexpr int kExpectedGates = 14;
     if (failures == 0 && gates_reported != kExpectedGates)
         failures += fail("suite", "only " + std::to_string(gates_reported) + " of " +
                                       std::to_string(kExpectedGates) +

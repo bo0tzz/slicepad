@@ -648,6 +648,18 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         GCodeProcessorResult result;
         try {
             print.process();
+
+            // GCode::do_export returns immediately, without touching `result`, when
+            // its step is still done from an earlier slice and a file already sits
+            // at the path. Slicing twice without changing anything is exactly that,
+            // and the app writes to one filename every time — so the second slice
+            // reported no statistics and no toolpath for G-code that was perfectly
+            // good, and only moving the object appeared to fix it.
+            //
+            // sp_slice promises statistics and a toolpath on every call, so the
+            // export always runs. process() above still skips the expensive steps
+            // it can, which is where the time actually goes.
+            print.set_gcode_file_invalidated();
             // Mainsail and Fluidd show whatever the G-code carries, and libslic3r
             // does the PNG encoding and embedding — the callback only has to
             // return pixels. It renders the mesh rather than the toolpath because
