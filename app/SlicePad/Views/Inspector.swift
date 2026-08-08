@@ -135,8 +135,17 @@ struct Inspector: View {
                                    startPrint: startAfterUpload)
                     }
                     .disabled(printerAddress.isEmpty || model.gcodeURL == nil)
+                    // A greyed-out button with nothing beside it is a dead end,
+                    // and this section is visible before there is anything to
+                    // send — so it says which of the two is missing.
                     if let state = model.sendState {
                         Text(state).font(.footnote).foregroundStyle(.secondary)
+                    } else if model.gcodeURL == nil {
+                        Text("Slice first — there is nothing to send yet.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else if printerAddress.isEmpty {
+                        Text("Enter your printer's address above.")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }
