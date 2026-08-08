@@ -216,12 +216,6 @@ final class AppModel: ObservableObject {
         sendState = "Connecting"
         Task {
             defer { isSending = false }
-            guard await printer.reachable() else {
-                isSending = false
-                error = "Could not reach the printer at \(address)."
-                sendState = nil
-                return
-            }
             do {
                 sendState = "Uploading"
                 let result = try await printer.upload(gcode, as: name)

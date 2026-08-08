@@ -129,23 +129,6 @@ struct Moonraker {
         _ = try await send(request, body: body)
     }
 
-    /// Whether the address leads to something answering HTTP.
-    ///
-    /// Asks Moonraker about itself rather than about the printer. /printer/info is
-    /// proxied to Klipper and answers 503 whenever Klippy is starting, shut down or
-    /// disconnected — all states a reachable machine sits in — so using it reported
-    /// "could not reach the printer" for a printer that was plainly there. Any HTTP
-    /// answer at all settles the question this is asked for; whether Klipper is
-    /// ready is the upload's business to report.
-    func reachable() async -> Bool {
-        var request = URLRequest(url: host.appendingPathComponent("server/info"))
-        // Generous, because the first contact with a .local name waits on mDNS.
-        request.timeoutInterval = 15
-        apiKey.map { request.setValue($0, forHTTPHeaderField: "X-Api-Key") }
-        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
-        return response is HTTPURLResponse
-    }
-
     /// Moonraker reports failures as {"error": {"message": "Klippy Not Connected"}}.
     /// That sentence is the useful part; the JSON around it is not.
     static func detail(fromErrorBody body: String) -> String {
