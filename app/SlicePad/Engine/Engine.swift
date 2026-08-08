@@ -59,7 +59,12 @@ final class Engine {
     // MARK: Profile
 
     func loadProfile(at url: URL) throws {
-        try withSecurityScope(url) { try check(sp_load_config(handle, $0.path)) }
+        try withSecurityScope(url) { scoped in
+            try check(sp_load_config(handle, scoped.path))
+            // Best effort: a profile that loaded but could not be filed away is
+            // still usable now, and the only cost is picking it again next launch.
+            try? ProfileStore.save(scoped)
+        }
     }
 
     /// Empty when the profile records no version. A mismatch against

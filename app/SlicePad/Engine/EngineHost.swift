@@ -65,6 +65,14 @@ final class EngineHost: @unchecked Sendable {
         let placedModel: Bool
     }
 
+    /// The profile from the last run, if there is one. Separate from loadProfile
+    /// so a stored file that no longer loads — an engine bump, a corrupted copy —
+    /// is a quiet absence at launch rather than an error over an empty plate.
+    func restoreProfile() async -> LoadedProfile? {
+        guard let saved = ProfileStore.saved else { return nil }
+        return try? await loadProfile(at: saved)
+    }
+
     func loadProfile(at url: URL) async throws -> LoadedProfile {
         try await perform { engine in
             try engine.loadProfile(at: url)

@@ -64,7 +64,6 @@ struct ContentView: View {
                       openModel: { startImport(.model) })
                 .frame(width: 320)
         }
-        .ignoresSafeArea(.keyboard)
         .fileImporter(isPresented: $isImporting,
                       allowedContentTypes: importKind.types) { result in
             guard case let .success(url) = result else { return }
@@ -78,6 +77,8 @@ struct ContentView: View {
         // code on a device. It exists so a screenshot can show the plate with a
         // model on it — the 3D view is the one part nothing else can check.
         .task {
+            model.restoreProfile()
+
             guard let fixtures = ProcessInfo.processInfo.environment["SLICEPAD_PRELOAD"] else { return }
             let directory = URL(fileURLWithPath: fixtures)
             model.loadProfile(directory.appendingPathComponent("model.3mf"))

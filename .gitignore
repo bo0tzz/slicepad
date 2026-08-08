@@ -10,3 +10,6 @@ deps/prefix/
 
 # Generated from app/project.yml by `mise run app-project`.
 app/SlicePad.xcodeproj/
+
+# Worktrees created for background agents.
+.claude/

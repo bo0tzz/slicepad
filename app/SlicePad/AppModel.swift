@@ -76,6 +76,27 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Called once when the app appears.
+    func restoreProfile() {
+        guard profileName == nil else { return }
+        run { host in
+            guard let profile = await host.restoreProfile() else { return }
+            self.overrides = profile.settings
+            self.profileName = ProfileStore.name
+            self.profileVersionNote = Self.versionNote(profile.version)
+            if profile.placedModel { self.modelGeneration += 1 }
+            await self.refreshGeometry()
+        }
+    }
+
+    private static func versionNote(_ version: String) -> String? {
+        // A mismatch is normal — libslic3r migrates older profiles — so this is
+        // worth showing but not worth blocking on.
+        (version.isEmpty || version == Engine.configVersion)
+            ? nil
+            : "Saved by config \(version); engine uses \(Engine.configVersion)."
+    }
+
     func loadProfile(_ url: URL) {
         run { host in
             let profile = try await host.loadProfile(at: url)
@@ -83,11 +104,7 @@ final class AppModel: ObservableObject {
             self.overrides = profile.settings
             if profile.placedModel { self.modelGeneration += 1 }
             self.profileName = url.deletingPathExtension().lastPathComponent
-            // A mismatch is normal — libslic3r migrates older profiles — so this is
-            // worth showing but not worth blocking on.
-            self.profileVersionNote = (version.isEmpty || version == Engine.configVersion)
-                ? nil
-                : "Saved by config \(version); engine uses \(Engine.configVersion)."
+            self.profileVersionNote = Self.versionNote(version)
             await self.refreshGeometry()
         }
     }
@@ -145,8 +162,12 @@ final class AppModel: ObservableObject {
         cancelFlag = CancelFlag()
         stats = nil
 
+        // Named after the model: an export lands in Files or a printer's queue
+        // beside other jobs, where "slicepad.gcode" says nothing about which part
+        // it is.
+        let stem = (modelName as NSString?)?.deletingPathExtension ?? "slicepad"
         let output = FileManager.default.temporaryDirectory
-            .appendingPathComponent("slicepad.gcode")
+            .appendingPathComponent(stem).appendingPathExtension("gcode")
         let overrides = overrides
         let cancelFlag = cancelFlag
 

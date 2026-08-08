@@ -152,6 +152,10 @@ std::string line_containing(const std::string &text, const std::string &needle)
 // Every gate reports itself, and the total is checked at the end. Deleting a gate
 // otherwise looks exactly like it passing — which is how five of them once went
 // missing while the suite still said PASS.
+// Exactly what the app sends: the three controls it exposes, every slice.
+const char *const kAppOverrides =
+    "{\"wall_loops\": \"3\", \"sparse_infill_density\": \"20%\", \"enable_support\": \"0\"}";
+
 int gates_reported = 0;
 
 int reported(const char *gate)
@@ -802,9 +806,65 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 14: slicing twice without changing anything gives the same answer.
+    // Reported from a real device: the second slice emptied the statistics and the
+    // layer view fell back to the solid model, and auto-orienting fixed it only
+    // when it actually moved the object — which points at reused Print state
+    // rather than at anything in the G-code.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (probe == nullptr) {
+            failures += fail("gate14", "could not create an engine");
+        } else {
+            const std::string profile = fixtures + "/model.3mf";
+            const std::string mesh = fixtures + "/model-shapr3d.3mf";
+            const std::string first_path = work + "/twice-1.gcode";
+            const std::string second_path = work + "/twice-2.gcode";
+
+            if (sp_load_config(probe, profile.c_str()) != SP_OK ||
+                sp_load_model(probe, mesh.c_str()) != SP_OK ||
+                sp_auto_orient(probe) != SP_OK || sp_arrange(probe) != SP_OK) {
+                failures += fail("gate14", std::string("setup: ") + sp_last_error(probe));
+            // The app sets its three overrides before every slice, including when
+            // nothing changed, so the re-slice path has to be exercised the same
+            // way rather than through sp_slice alone.
+            } else if (sp_set_overrides(probe, kAppOverrides) != SP_OK ||
+                       sp_slice(probe, first_path.c_str(), nullptr, nullptr) != SP_OK) {
+                failures += fail("gate14", std::string("first slice: ") + sp_last_error(probe));
+            } else {
+                const std::string first_stats = sp_slice_stats_json(probe);
+                const size_t first_segments = sp_toolpath_segment_count(probe);
+
+                if (sp_set_overrides(probe, kAppOverrides) != SP_OK ||
+                    sp_slice(probe, second_path.c_str(), nullptr, nullptr) != SP_OK) {
+                    failures += fail("gate14", std::string("second slice: ") + sp_last_error(probe));
+                } else {
+                    const std::string second_stats = sp_slice_stats_json(probe);
+                    const size_t second_segments = sp_toolpath_segment_count(probe);
+
+                    if (second_stats != first_stats)
+                        failures += fail("gate14", "statistics changed on an unchanged re-slice:\n"
+                                                       "  first  " + first_stats + "\n"
+                                                       "  second " + second_stats);
+                    if (failures == 0 && second_segments != first_segments)
+                        failures += fail("gate14", "toolpath went from " +
+                                                       std::to_string(first_segments) + " segments to " +
+                                                       std::to_string(second_segments));
+                    if (failures == 0 && read_file(second_path) != read_file(first_path))
+                        failures += fail("gate14", "the G-code itself differs between identical slices");
+                }
+                if (failures == 0)
+                    reported("gate14"), std::printf(
+                        "gate14 re-slice: identical stats, %zu toolpath segments both times\n",
+                        first_segments);
+            }
+            sp_engine_destroy(probe);
+        }
+    }
+
     sp_engine_destroy(engine);
 
-    constexpr int kExpectedGates = 13;
+    constexpr int kExpectedGates = 14;
     if (failures == 0 && gates_reported != kExpectedGates)
         failures += fail("suite", "only " + std::to_string(gates_reported) + " of " +
                                       std::to_string(kExpectedGates) +
