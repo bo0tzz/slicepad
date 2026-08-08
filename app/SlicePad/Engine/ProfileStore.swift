@@ -31,6 +31,12 @@ enum ProfileStore {
 
     static func save(_ source: URL) throws {
         guard let fileURL else { return }
+        // Restoring loads this very file, and loading always saves. Without this
+        // the restore removed the destination and then failed to copy the file
+        // onto itself — so remembering a profile destroyed it, and the launch
+        // after the next one had nothing left to remember.
+        guard source.standardizedFileURL != fileURL.standardizedFileURL else { return }
+
         try? FileManager.default.removeItem(at: fileURL)
         try FileManager.default.copyItem(at: source, to: fileURL)
         name = source.deletingPathExtension().lastPathComponent

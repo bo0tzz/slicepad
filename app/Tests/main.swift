@@ -135,5 +135,29 @@ if let stats = try? JSONDecoder().decode(SliceStats.self, from: Data(statsJSON.u
 check("an empty result does not decode",
       (try? JSONDecoder().decode(SliceStats.self, from: Data("{}".utf8))) == nil)
 
+// MARK: Remembering the profile
+
+// Loading a profile saves it, and restoring loads the saved one — so save() is
+// called with its own destination, and used to delete it.
+if let directory = try? FileManager.default.url(for: .applicationSupportDirectory,
+                                                in: .userDomainMask,
+                                                appropriateFor: nil, create: true) {
+    let original = directory.appendingPathComponent("profile-store-check.3mf")
+    try? Data("carrier".utf8).write(to: original)
+
+    try? ProfileStore.save(original)
+    let stored = ProfileStore.saved
+    check("a profile is stored", stored != nil)
+
+    if let stored {
+        try? ProfileStore.save(stored)
+        check("storing the stored profile leaves it there",
+              FileManager.default.fileExists(atPath: stored.path))
+        check("and it still has its contents",
+              (try? Data(contentsOf: stored)) == Data("carrier".utf8))
+    }
+    try? FileManager.default.removeItem(at: original)
+}
+
 print(failures == 0 ? "PASS" : "FAIL: \(failures) checks")
 exit(failures == 0 ? 0 : 1)

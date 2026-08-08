@@ -64,6 +64,7 @@ jobs:
           swiftc -o build/appchecks \
             app/SlicePad/Engine/Settings.swift \
             app/SlicePad/Engine/Moonraker.swift \
+            app/SlicePad/Engine/ProfileStore.swift \
             app/Tests/main.swift
           ./build/appchecks
 
