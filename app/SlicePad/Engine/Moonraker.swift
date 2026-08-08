@@ -39,25 +39,55 @@ struct Moonraker {
     }
 
     enum Failure: LocalizedError {
-        case badResponse(status: Int, body: String)
-        case unexpectedPayload
+        case unreachable(address: String, reason: String)
+        case badResponse(status: Int, detail: String)
+        case unexpectedPayload(body: String)
 
         var errorDescription: String? {
             switch self {
-            case let .badResponse(status, body):
-                return "The printer answered \(status). \(body.prefix(200))"
-            case .unexpectedPayload:
-                return "The printer's reply was not in the expected form."
+            case let .unreachable(address, reason):
+                return "Could not reach \(address). \(reason)"
+            case let .badResponse(status, detail):
+                return "The printer answered \(status). \(detail)"
+            case let .unexpectedPayload(body):
+                // Thrown after the file has already arrived, so it says so —
+                // reporting it as a plain failure is what left someone believing
+                // the upload had not happened when it had. The body is quoted
+                // because the alternative is guessing at a shape we did not read.
+                let landed = "The file reached the printer, but its reply did not "
+                    + "name the file, so the print was not started."
+                return body.isEmpty ? landed : landed + " It said: \(body)"
             }
         }
     }
 
+    /// Moonraker has moved the uploaded item between the top level and a "result"
+    /// envelope across versions, and both are in the field — the SV08 this was
+    /// first run against returns the top-level shape, which is why reading only
+    /// the envelope failed on an upload that had in fact succeeded.
     private struct UploadResponse: Decodable {
-        struct Result: Decodable {
-            struct Item: Decodable { let path: String }
-            let item: Item
+        struct Item: Decodable { let path: String }
+        struct Envelope: Decodable { let item: Item? }
+
+        let item: Item?
+        let result: Envelope?
+
+        var path: String? { item?.path ?? result?.item?.path }
+    }
+
+    /// Split out from the request so it can be checked directly — see app/Tests.
+    ///
+    /// Deliberately throws rather than falling back to the filename we sent, which
+    /// is what Orca does. Moonraker renames on collision, so that fallback can name
+    /// an *older* file of the same name, and starting the wrong print is worse than
+    /// reporting that the upload landed but could not be identified.
+    static func uploadedPath(fromResponse data: Data) throws -> String {
+        let body = String(data: data, encoding: .utf8) ?? ""
+        guard let decoded = try? JSONDecoder().decode(UploadResponse.self, from: data),
+              let path = decoded.path, !path.isEmpty else {
+            throw Failure.unexpectedPayload(body: String(body.prefix(200)))
         }
-        let result: Result
+        return path
     }
 
     func upload(_ gcode: URL, as name: String) async throws -> UploadResult {
@@ -83,10 +113,8 @@ struct Moonraker {
         body.append("\r\n--\(boundary)--\r\n")
 
         let data = try await send(request, body: body)
-        guard let decoded = try? JSONDecoder().decode(UploadResponse.self, from: data) else {
-            throw Failure.unexpectedPayload
-        }
-        return UploadResult(path: decoded.result.item.path)
+        let path = try Self.uploadedPath(fromResponse: data)
+        return UploadResult(path: path)
     }
 
     /// Started explicitly rather than with the upload's `print=true`, which is what
@@ -101,22 +129,55 @@ struct Moonraker {
         _ = try await send(request, body: body)
     }
 
-    /// Cheap check against a wrong address, so that failure reads as "cannot reach
-    /// the printer" rather than as a confusing upload error.
+    /// Whether the address leads to something answering HTTP.
+    ///
+    /// Asks Moonraker about itself rather than about the printer. /printer/info is
+    /// proxied to Klipper and answers 503 whenever Klippy is starting, shut down or
+    /// disconnected — all states a reachable machine sits in — so using it reported
+    /// "could not reach the printer" for a printer that was plainly there. Any HTTP
+    /// answer at all settles the question this is asked for; whether Klipper is
+    /// ready is the upload's business to report.
     func reachable() async -> Bool {
-        var request = URLRequest(url: host.appendingPathComponent("printer/info"))
-        request.timeoutInterval = 5
+        var request = URLRequest(url: host.appendingPathComponent("server/info"))
+        // Generous, because the first contact with a .local name waits on mDNS.
+        request.timeoutInterval = 15
         apiKey.map { request.setValue($0, forHTTPHeaderField: "X-Api-Key") }
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 200
+        return response is HTTPURLResponse
+    }
+
+    /// Moonraker reports failures as {"error": {"message": "Klippy Not Connected"}}.
+    /// That sentence is the useful part; the JSON around it is not.
+    static func detail(fromErrorBody body: String) -> String {
+        struct Envelope: Decodable {
+            struct Reported: Decodable { let message: String? }
+            let error: Reported?
+        }
+        if let data = body.data(using: .utf8),
+           let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+           let message = envelope.error?.message, !message.isEmpty {
+            return message
+        }
+        return String(body.prefix(200))
     }
 
     private func send(_ request: URLRequest, body: Data) async throws -> Data {
-        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        } catch {
+            // A wrong address arrives here rather than as a status code, and the
+            // address is the thing worth naming when it does.
+            throw Failure.unreachable(address: host.absoluteString,
+                                      reason: error.localizedDescription)
+        }
+
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
-            throw Failure.badResponse(status: status,
-                                      body: String(data: data, encoding: .utf8) ?? "")
+            throw Failure.badResponse(
+                status: status,
+                detail: Self.detail(fromErrorBody: String(data: data, encoding: .utf8) ?? ""))
         }
         return data
     }

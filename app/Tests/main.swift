@@ -77,6 +77,46 @@ check("a query string is not mistaken for a scheme",
       String(describing: Moonraker.address(from: "sv08.local/x?u=a://b")))
 check("empty input is refused", Moonraker.address(from: "   ") == nil)
 
+// MARK: Upload replies
+
+// Moonraker has returned the uploaded item both at the top level and inside a
+// "result" envelope, and both shapes are in the field. Reading only the envelope
+// meant a real SV08 upload that had already landed was reported as a failure.
+func uploadedPath(_ json: String) -> String? {
+    try? Moonraker.uploadedPath(fromResponse: Data(json.utf8))
+}
+
+check("the top-level reply names the file",
+      uploadedPath(#"{"item": {"path": "part.gcode", "root": "gcodes"}, "print_started": false}"#)
+          == "part.gcode")
+check("the result-wrapped reply names the file",
+      uploadedPath(#"{"result": {"item": {"path": "part.gcode", "root": "gcodes"}}}"#)
+          == "part.gcode")
+// The server renames on collision, so the reply is authoritative over what we sent.
+check("a renamed file is taken from the reply",
+      uploadedPath(#"{"item": {"path": "part_1.gcode"}}"#) == "part_1.gcode")
+
+check("malformed JSON is refused", uploadedPath("not json at all") == nil)
+check("a reply without a path is refused", uploadedPath(#"{"result": {}}"#) == nil)
+check("an empty path is refused", uploadedPath(#"{"item": {"path": ""}}"#) == nil)
+
+// Falling back to the name we sent would risk starting an older print of the same
+// name, so the refusal has to say what actually arrived instead.
+do {
+    _ = try Moonraker.uploadedPath(fromResponse: Data(#"{"surprise": 1}"#.utf8))
+    check("an unreadable reply throws", false)
+} catch {
+    check("an unreadable reply throws", true)
+    check("and quotes what came back",
+          error.localizedDescription.contains("surprise"), error.localizedDescription)
+}
+
+check("a Moonraker error message is lifted out of its envelope",
+      Moonraker.detail(fromErrorBody: #"{"error": {"code": 503, "message": "Klippy Not Connected"}}"#)
+          == "Klippy Not Connected")
+check("a body that is not a Moonraker error is passed through",
+      Moonraker.detail(fromErrorBody: "upstream timed out") == "upstream timed out")
+
 // MARK: Slice statistics
 
 let statsJSON = """
