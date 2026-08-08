@@ -160,9 +160,12 @@ struct Moonraker {
             // discover that by chance.
             throw Failure.unreachable(address: host.absoluteString,
                                       reason: error.localizedDescription
-                                          + " If this was the first time, iOS asked "
-                                          + "for permission to use the local network "
-                                          + "just now — try again.")
+                                          + " If this is the first send, iOS has just "
+                                          + "asked for permission to use the local "
+                                          + "network — try again. If it was refused "
+                                          + "before, iOS will not ask a second time: "
+                                          + "Settings › Privacy & Security › Local "
+                                          + "Network.")
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0

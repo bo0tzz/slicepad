@@ -130,8 +130,8 @@ struct PlateView: UIViewRepresentable {
         private let orbitSpeed: Float = 0.006
 
         func apply() {
-            // Never quite flat and never over the top: past either the turntable
-            // stops making sense and look(at:) has no stable up vector.
+            // Never quite flat and never over the top: past either, a turntable
+            // stops describing what the fingers are doing.
             pitch = min(max(pitch, 0.05), 1.5)
             distance = min(max(distance, 10), 3000)
 
@@ -139,7 +139,12 @@ struct PlateView: UIViewRepresentable {
             cameraNode.simdPosition = target + SIMD3<Float>(horizontal * sin(yaw),
                                                             distance * sin(pitch),
                                                             horizontal * cos(yaw))
-            cameraNode.look(at: SCNVector3(target.x, target.y, target.z))
+            // Set from the angles rather than solved for with look(at:), which
+            // orients relative to where the node already points — so each call
+            // starts from the last one's answer and drift accumulates as roll.
+            // Yaw and pitch place the camera, so they describe its orientation
+            // exactly, and a turntable has no roll by definition.
+            cameraNode.simdEulerAngles = SIMD3<Float>(-pitch, yaw, 0)
         }
 
         @objc func orbit(_ gesture: UIPanGestureRecognizer) {
