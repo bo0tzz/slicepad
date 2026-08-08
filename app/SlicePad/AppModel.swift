@@ -165,7 +165,7 @@ final class AppModel: ObservableObject {
         // Named after the model: an export lands in Files or a printer's queue
         // beside other jobs, where "slicepad.gcode" says nothing about which part
         // it is.
-        let stem = (modelName as NSString?)?.deletingPathExtension ?? "slicepad"
+        let stem = modelName.map { ($0 as NSString).deletingPathExtension } ?? "slicepad"
         let output = FileManager.default.temporaryDirectory
             .appendingPathComponent(stem).appendingPathExtension("gcode")
         let overrides = overrides
