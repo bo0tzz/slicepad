@@ -17,6 +17,10 @@ struct ContentView: View {
     @State private var isImporting = false
     @State private var importKind: ImportKind = .profile
 
+    /// A file handed to us by another app. A .3mf could be either thing, and the
+    /// app does not guess between them anywhere else, so it asks here too.
+    @State private var offered: URL?
+
     enum ImportKind {
         case profile, model
 
@@ -63,6 +67,28 @@ struct ContentView: View {
                       setProfile: { startImport(.profile) },
                       openModel: { startImport(.model) })
                 .frame(width: 320)
+        }
+        .onOpenURL { url in
+            // Only .3mf is ambiguous; a mesh format can only be a model.
+            if url.pathExtension.lowercased() == "3mf" {
+                offered = url
+            } else {
+                model.loadModel(url)
+            }
+        }
+        .confirmationDialog("Open \(offered?.lastPathComponent ?? "")",
+                            isPresented: Binding(get: { offered != nil },
+                                                 set: { if !$0 { offered = nil } }),
+                            titleVisibility: .visible) {
+            Button("Open as a model") {
+                if let offered { model.loadModel(offered) }
+            }
+            Button("Use as the profile") {
+                if let offered { model.loadProfile(offered) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A project saved by Orca sets the profile. Anything else is a model.")
         }
         .fileImporter(isPresented: $isImporting,
                       allowedContentTypes: importKind.types) { result in

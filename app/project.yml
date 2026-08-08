@@ -50,6 +50,31 @@ targets:
         # turning ATS off: nothing here should be reaching the internet.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # So a model can arrive from the app that made it — Shapr3D's share sheet
+        # — instead of going out to Files and being fetched back.
+        LSSupportsOpeningDocumentsInPlace: true
+        # 3MF has no Apple-defined type, so it is declared here. Imported rather
+        # than exported: the format is not ours, we only read it.
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.3mf.model
+            UTTypeDescription: 3D Manufacturing Format
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - 3mf
+              public.mime-type:
+                - model/3mf
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: 3D model
+            CFBundleTypeRole: Viewer
+            # Alternate: a slicer is rarely what you want a mesh opened in by
+            # default, and claiming otherwise would be presumptuous.
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - org.3mf.model
+              - public.standard-tesselated-geometry-format
+              - public.geometry-definition-format
 
     dependencies:
       - framework: ../build/SlicePadCore.xcframework
