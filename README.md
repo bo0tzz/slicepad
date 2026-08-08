@@ -10,7 +10,8 @@ Desktop Orca is involved once, to author the profile.
 ## Status
 
 The engine works and is verified against real inputs, including on an iOS
-platform. There is an installable app; nothing has been run on physical hardware.
+platform. G-code sliced by the app on an iPad has been printed successfully on a
+Sovol SV08.
 
 Install it by adding this source to SideStore, or from the releases page:
 
@@ -38,9 +39,11 @@ https://raw.githubusercontent.com/bo0tzz/slicepad/main/sidestore.json
   with progress and cancellation, and the Moonraker upload. Every layer of it is
   checked by something, but nobody has operated it.
 
-Two gaps remain, both needing a person: nothing has run on physical hardware, and
-nothing has been printed from this engine's output. The second is the one worth
-respecting — a slicer's failure mode is a ruined print, not an error dialog.
+The gates say the output matches desktop Orca's; a successful print says the
+output drives a printer. Those are different claims, and only the second one is
+about the thing anybody wants. It has now been made once, on one printer, with
+one profile — which is a great deal more than nothing and a great deal less than
+a guarantee.
 
 One finding qualifies what this can promise: byte-identical G-code is a property
 of identical code generation rather than of the engine, so the iPad will produce
