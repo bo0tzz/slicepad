@@ -27,18 +27,36 @@ below.
 | `file` | the G-code |
 | `root` | storage root, default `gcodes` |
 
-Response shape:
+Response shape — **two of them are in the field**:
 
 ```json
 { "result": { "item": { "path": "<name>.gcode", "root": "<root>" },
               "print_started": false } }
 ```
 
+```json
+{ "item": { "path": "<name>.gcode", "root": "<root>" },
+  "print_started": false, "action": "create_file" }
+```
+
+Orca reads only `result.item.path`. A Sovol SV08 returns the second, top-level
+shape, so reading only the envelope reported a failure for an upload that had
+already succeeded — the file was on the printer and the app said otherwise. Read
+both.
+
 **Start the print** — `POST /printer/print/start`, JSON body
-`{"filename": "<result.item.path>"}`.
+`{"filename": "<item.path>"}`.
 
 The path comes from the upload response, is relative to `root`, has no leading
 slash, and keeps its extension.
+
+### Where we diverge from Orca deliberately
+
+When the path is missing or the reply will not parse, Orca falls back to the
+filename it uploaded. We refuse instead. Moonraker renames on collision, so that
+fallback can name an *older* file of the same name, and silently printing the
+wrong thing is worse than an error saying the upload landed but could not be
+identified.
 
 ## The correction worth carrying forward
 
@@ -59,7 +77,16 @@ the filename was interpreted.
   Moonraker, so a 404 should degrade quietly to the `gcodes` default rather than
   warn.
 - Orca runs a connectivity test before uploading, so a wrong address fails with a
-  clear message instead of a confusing upload error.
+  clear message instead of a confusing upload error. It asks `GET /server/info`
+  and wants `result.klippy_state` present — not any particular state, because
+  buddy-fork firmwares idle in states other than `ready`.
+- **Do not use `/printer/info` for that check.** It is proxied to Klipper and
+  answers 503 whenever Klippy is starting, shut down or disconnected, which are
+  all states a perfectly reachable printer sits in. Using it produced "could not
+  reach the printer" against a printer that was plainly there and accepted the
+  upload moments later. `/server/info` is answered by Moonraker itself.
+- First contact with a `.local` address waits on mDNS, which can take longer than
+  a five-second timeout allows.
 - A `plateindex` form field exists for uploading `.gcode.3mf`, where the G-code is
   index-coded per plate. Irrelevant here: we upload a plain `.gcode`. Servers
   ignore unknown fields.
