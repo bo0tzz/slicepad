@@ -133,6 +133,18 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Called when a rotation ring is released, with all three angles in degrees.
+    /// The gizmo turns one axis at a time, but every argument of the engine's
+    /// transform is absolute, so it sends the whole set.
+    func rotateObject(x: Double, y: Double, z: Double) {
+        // The inspector's stepper and the ring are two views of the same number.
+        rotateZ = z
+        run { host in
+            try await host.setRotation(x: x, y: y, z: z)
+            await self.refreshGeometry()
+        }
+    }
+
     func autoOrient() {
         run { host in
             try await host.autoOrient()

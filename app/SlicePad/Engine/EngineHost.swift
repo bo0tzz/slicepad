@@ -12,6 +12,11 @@ struct PlateGeometry {
     /// from wherever the finger landed on the mesh.
     var offset = SIMD2<Float>(0, 0)
 
+    /// Rotation about each bed axis, in degrees. Only Z has a control in the
+    /// inspector, so for X and Y the engine is the only place the values live and
+    /// this is how the gizmo learns what it is turning away from.
+    var rotation = SIMD3<Float>(0, 0, 0)
+
     /// Bumped whenever the engine is read again. The view rebuilds on a change of
     /// this rather than on a change of the arrays: a progress tick redraws the whole
     /// UI a hundred times during a slice, and comparing a few hundred thousand
@@ -153,6 +158,18 @@ final class EngineHost: @unchecked Sendable {
         }
     }
 
+    /// Turns the object about all three axes, keeping its size and position. The
+    /// gizmo changes one axis at a time but has to send all three, because every
+    /// argument of sp_set_transform is absolute.
+    func setRotation(x: Double, y: Double, z: Double) async throws {
+        try await perform { engine in
+            let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
+            try engine.setTransform(scale: current[0], rotateX: x, rotateY: y,
+                                    rotateZ: z, translateX: current[4],
+                                    translateY: current[5])
+        }
+    }
+
     /// Applies the two controls the app exposes, keeping the X and Y rotation
     /// auto-orient chose and the position the object sits at — same reason.
     func setScaleAndRotation(scale: Double, rotateZ: Double) async throws {
@@ -185,6 +202,8 @@ final class EngineHost: @unchecked Sendable {
             )
             if let placement = engine.transform() {
                 geometry.offset = SIMD2(Float(placement[4]), Float(placement[5]))
+                geometry.rotation = SIMD3(Float(placement[1]), Float(placement[2]),
+                                          Float(placement[3]))
             }
             return geometry
         }

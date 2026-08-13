@@ -140,11 +140,7 @@ struct ContentView: View {
         } else {
             PlateView(geometry: model.geometry, display: model.display,
                       onMove: { x, y in model.moveObject(x: x, y: y) },
-                      rotationDegrees: model.rotateZ,
-                      onRotate: { degrees in
-                          model.rotateZ = degrees
-                          model.applyTransform()
-                      })
+                      onRotate: { x, y, z in model.rotateObject(x: x, y: y, z: z) })
         }
     }
 }
