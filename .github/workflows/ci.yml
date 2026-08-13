@@ -257,6 +257,27 @@ jobs:
             build/dl-cache
           key: deps-iossim-arm64-${{ steps.deps-fp.outputs.hash }}-${{ github.run_id }}
 
+      # The compiled engine, keyed on the sources that go into it. libslic3r is
+      # ten minutes of the simulator job and does not change when the app does,
+      # which is most iterations — a change to a SwiftUI view should not rebuild a
+      # slicer.
+      - name: Fingerprint the engine sources
+        id: engine-fp
+        run: |
+          hash=$( { find core tests -type f -print0 | sort -z | xargs -0 shasum -a 256;
+                    shasum -a 256 CMakeLists.txt patches/*.patch;
+                    echo "${{ steps.deps-fp.outputs.hash }}"; } | shasum -a 256 | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the built engine
+        id: engine-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/iossim
+            build/iossim-fw
+          key: engine-iossim-${{ steps.engine-fp.outputs.hash }}
+
       - name: Build the gates for the simulator
         run: |
           cmake -S . -B build/iossim -G Ninja \
