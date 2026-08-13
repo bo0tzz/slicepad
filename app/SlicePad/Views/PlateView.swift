@@ -11,6 +11,10 @@ struct PlateView: UIViewRepresentable {
     let display: AppModel.Display
     /// Where the object was dragged to, in bed millimetres, once the finger lifts.
     var onMove: ((Double, Double) -> Void)?
+    /// The object's rotation about the bed's up axis, in degrees, and where the
+    /// ring left it.
+    var rotationDegrees: Double = 0
+    var onRotate: ((Double) -> Void)?
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -60,7 +64,9 @@ struct PlateView: UIViewRepresentable {
 
     func updateUIView(_ view: SCNView, context: Context) {
         context.coordinator.onMove = onMove
+        context.coordinator.onRotate = onRotate
         context.coordinator.objectOffset = geometry.offset
+        context.coordinator.rotationDegrees = rotationDegrees
         guard let root = view.scene?.rootNode.childNode(withName: "root", recursively: false) else { return }
 
         // SwiftUI re-runs this for any state change at all, progress ticks included.
@@ -77,9 +83,22 @@ struct PlateView: UIViewRepresentable {
         switch display {
         case .model:
             if let node = solidNode(geometry.triangles) {
-            node.name = "model"
-            root.addChildNode(node)
-        }
+                node.name = "model"
+                root.addChildNode(node)
+                context.coordinator.modelNode = node
+
+                // Handles only where they mean something: there is nothing to
+                // place once the part has been sliced into a toolpath.
+                if let bounds = geometry.bounds {
+                    let centre = SIMD2<Float>((bounds.min.x + bounds.max.x) / 2,
+                                              (bounds.min.y + bounds.max.y) / 2)
+                    let gizmo = gizmoNode(centre: centre)
+                    root.addChildNode(gizmo)
+                    context.coordinator.gizmo = gizmo
+                    context.coordinator.gizmoCentre = centre
+                    context.coordinator.updateHandleScale()
+                }
+            }
         case .layers:
             if let node = toolpathNode(geometry.toolpath) {
                 root.addChildNode(node)
@@ -115,13 +134,28 @@ struct PlateView: UIViewRepresentable {
 
         weak var view: SCNView?
         var onMove: ((Double, Double) -> Void)?
+        var onRotate: ((Double) -> Void)?
         var objectOffset = SIMD2<Float>(0, 0)
+        var rotationDegrees: Double = 0
 
-        /// Set when a drag started on the model, so the same one-finger gesture
-        /// moves the part instead of orbiting — which is how every slicer behaves,
-        /// and means a drag that starts on empty plate still turns the view.
-        private var dragStart: SIMD2<Float>?
-        private weak var dragged: SCNNode?
+        weak var modelNode: SCNNode?
+        weak var gizmo: SCNNode?
+        var gizmoCentre = SIMD2<Float>(0, 0)
+
+        /// What the one-finger gesture is doing for its lifetime, decided when it
+        /// starts: a handle if it began on one, the part if it began on that, and
+        /// otherwise the camera — so a drag from empty plate still turns the view.
+        private enum Handle { case body, axisX, axisY, rotate }
+        private var handle: Handle?
+        private var startBed = SIMD2<Float>(0, 0)
+        private var startAngle: Float = 0
+
+        /// The gizmo is built at unit size and scaled to a fixed size on screen: a
+        /// handle that shrinks with the part is unusable at the zoom where placing
+        /// things is hardest.
+        private(set) var handleScale: Float = 1
+        var ringRadius: Float { 0.8 * handleScale }
+
         weak var truckGesture: UIPanGestureRecognizer?
         weak var dollyGesture: UIPinchGestureRecognizer?
 
@@ -166,29 +200,33 @@ struct PlateView: UIViewRepresentable {
             // Yaw and pitch place the camera, so they describe its orientation
             // exactly, and a turntable has no roll by definition.
             cameraNode.simdEulerAngles = SIMD3<Float>(-pitch, yaw, 0)
+            updateHandleScale()
+        }
+
+        /// Kept a constant size on screen, so the handles neither shrink out of
+        /// reach when the whole bed is in view nor swamp the part up close.
+        func updateHandleScale() {
+            guard let view, view.bounds.height > 0 else { return }
+            let fieldOfView = Float(cameraNode.camera?.fieldOfView ?? 60) * .pi / 180
+            let perPoint = 2 * distance * tan(fieldOfView / 2) / Float(view.bounds.height)
+            handleScale = perPoint * 90
+            gizmo?.simdScale = SIMD3<Float>(repeating: handleScale)
         }
 
         @objc func orbit(_ gesture: UIPanGestureRecognizer) {
             guard let view else { return }
+            let location = gesture.location(in: view)
 
             if gesture.state == .began {
-                let location = gesture.location(in: view)
-                let hit = view.hitTest(location, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
-                    .first(where: { $0.node.name == "model" })
-                dragged = hit?.node
-                dragStart = hit == nil ? nil : bedPoint(at: location)
+                handle = grabbed(at: location)
+                startBed = bedPoint(at: location) ?? SIMD2<Float>(0, 0)
+                startAngle = angle(at: location) ?? 0
             }
 
-            if let dragged, let dragStart, let now = bedPoint(at: gesture.location(in: view)) {
-                // The node is moved here and the engine told once, at the end.
-                // Re-transforming the mesh for every touch event would mean pulling
-                // a whole model's triangles across the ABI several times a second.
-                let delta = now - dragStart
-                dragged.simdPosition = SIMD3<Float>(delta.x, 0, -delta.y)
+            if let handle {
+                drag(handle, gesture)
                 if gesture.state == .ended || gesture.state == .cancelled {
-                    onMove?(Double(objectOffset.x + delta.x), Double(objectOffset.y + delta.y))
-                    self.dragged = nil
-                    self.dragStart = nil
+                    self.handle = nil
                 }
                 gesture.setTranslation(.zero, in: view)
                 return
@@ -200,6 +238,91 @@ struct PlateView: UIViewRepresentable {
             yaw -= Float(movement.x) * orbitSpeed
             pitch += Float(movement.y) * orbitSpeed
             apply()
+        }
+
+        private func grabbed(at location: CGPoint) -> Handle? {
+            guard let view else { return nil }
+            // Every result rather than the nearest: the handles are drawn over the
+            // part, so a touch near one lands on both and the handle has to win.
+            let hits = view.hitTest(location,
+                                    options: [.searchMode: SCNHitTestSearchMode.all.rawValue])
+            for hit in hits {
+                guard let name = hit.node.name else { continue }
+                if name == "gizmo.x" { return .axisX }
+                if name == "gizmo.y" { return .axisY }
+                if name == "gizmo.ring" { return .rotate }
+            }
+            return hits.contains(where: { $0.node.name == "model" }) ? .body : nil
+        }
+
+        /// Moves the nodes while the finger is down and tells the engine once, when
+        /// it lifts. Re-transforming the mesh for every touch event would drag a
+        /// whole model's triangles across the ABI several times a second.
+        private func drag(_ handle: Handle, _ gesture: UIPanGestureRecognizer) {
+            guard let view, let modelNode else { return }
+            let location = gesture.location(in: view)
+            let finished = gesture.state == .ended || gesture.state == .cancelled
+
+            if handle == .rotate {
+                guard let now = angle(at: location), let point = bedPoint(at: location) else { return }
+                // Snapped at the ring, free beyond it. The arc a finger covers per
+                // degree grows with the radius, so the gesture is coarse where it
+                // starts and fine where there is room — and there is no modifier to
+                // discover.
+                let free = simd_length(point - gizmoCentre) > ringRadius * 2
+                var absolute = rotationDegrees + Double(now - startAngle) * 180 / .pi
+                if !free {
+                    absolute = (absolute / 15).rounded() * 15
+                }
+                modelNode.simdTransform =
+                    Self.rotation(Float((absolute - rotationDegrees) * .pi / 180), about: gizmoCentre)
+                if finished {
+                    onRotate?(Self.normalised(absolute))
+                }
+                return
+            }
+
+            guard let now = bedPoint(at: location) else { return }
+            var delta = now - startBed
+            if handle == .axisX { delta.y = 0 }
+            if handle == .axisY { delta.x = 0 }
+
+            // Inside the root node the axes are the bed's own, which is why this is
+            // (x, y, 0) rather than the scene's (x, 0, -y).
+            modelNode.simdPosition = SIMD3<Float>(delta.x, delta.y, 0)
+            gizmo?.simdPosition = SIMD3<Float>(gizmoCentre.x + delta.x, gizmoCentre.y + delta.y, 0)
+            if finished {
+                onMove?(Double(objectOffset.x + delta.x), Double(objectOffset.y + delta.y))
+            }
+        }
+
+        /// Where the touch sits around the gizmo, in the bed's plane.
+        private func angle(at location: CGPoint) -> Float? {
+            guard let point = bedPoint(at: location) else { return nil }
+            let arm = point - gizmoCentre
+            guard simd_length(arm) > 1e-4 else { return nil }
+            return atan2(arm.y, arm.x)
+        }
+
+        private static func rotation(_ radians: Float, about centre: SIMD2<Float>) -> simd_float4x4 {
+            let pivot = SIMD3<Float>(centre.x, centre.y, 0)
+            let spin = simd_float4x4(simd_quatf(angle: radians, axis: SIMD3<Float>(0, 0, 1)))
+            return translation(pivot) * spin * translation(-pivot)
+        }
+
+        private static func translation(_ offset: SIMD3<Float>) -> simd_float4x4 {
+            var matrix = matrix_identity_float4x4
+            matrix.columns.3 = SIMD4<Float>(offset.x, offset.y, offset.z, 1)
+            return matrix
+        }
+
+        /// The control this feeds binds to -180...180, so a ring turned past the end
+        /// has to come back around rather than run off it.
+        private static func normalised(_ degrees: Double) -> Double {
+            var value = degrees.truncatingRemainder(dividingBy: 360)
+            if value > 180 { value -= 360 }
+            if value <= -180 { value += 360 }
+            return value
         }
 
         /// Where a screen point lands on the bed, in engine millimetres. Taken by
@@ -293,6 +416,77 @@ struct PlateView: UIViewRepresentable {
         geometry.firstMaterial?.diffuse.contents = UIColor.systemGray2
         geometry.firstMaterial?.lightingModel = .constant
         node.addChildNode(SCNNode(geometry: geometry))
+        return node
+    }
+
+    /// Handles for placing the part: an arrow along each bed axis and a ring for
+    /// turning it. Built at unit size, because the coordinator scales the whole
+    /// thing to a fixed size on screen.
+    private func gizmoNode(centre: SIMD2<Float>) -> SCNNode {
+        let node = SCNNode()
+        node.simdPosition = SIMD3<Float>(centre.x, centre.y, 0)
+        // Warm across, cool away: the pair reads as a pair, and neither is the
+        // orange of the part they sit on.
+        node.addChildNode(axisHandle(named: "gizmo.x", colour: .systemRed, alongX: true))
+        node.addChildNode(axisHandle(named: "gizmo.y", colour: .systemBlue, alongX: false))
+        node.addChildNode(rotationHandle())
+        return node
+    }
+
+    private func axisHandle(named name: String, colour: UIColor, alongX: Bool) -> SCNNode {
+        let node = SCNNode()
+
+        func part(_ geometry: SCNGeometry, at height: Float) -> SCNNode {
+            geometry.firstMaterial?.diffuse.contents = colour
+            geometry.firstMaterial?.lightingModel = .constant
+            // Drawn over the part rather than inside it: a handle hidden by the
+            // thing it moves is not a handle.
+            geometry.firstMaterial?.readsFromDepthBuffer = false
+            let child = SCNNode(geometry: geometry)
+            child.simdPosition = SIMD3<Float>(0, height, 0)
+            child.renderingOrder = 10
+            return child
+        }
+
+        node.addChildNode(part(SCNCylinder(radius: 0.022, height: 1), at: 0.5))
+        node.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: 0.08, height: 0.22), at: 1.11))
+
+        // The touch target is far larger than the drawing: a shaft a few points
+        // wide is not something a finger can find, and only this node is named, so
+        // only this node answers a hit test.
+        let target = SCNCylinder(radius: 0.15, height: 1.35)
+        target.firstMaterial?.colorBufferWriteMask = []
+        target.firstMaterial?.writesToDepthBuffer = false
+        let targetNode = SCNNode(geometry: target)
+        targetNode.name = name
+        targetNode.simdPosition = SIMD3<Float>(0, 0.675, 0)
+        node.addChildNode(targetNode)
+
+        // Cylinders and cones are built along Y, so the across-the-bed handle is
+        // the one that has to be turned.
+        if alongX {
+            node.simdRotation = SIMD4<Float>(0, 0, 1, -.pi / 2)
+        }
+        return node
+    }
+
+    private func rotationHandle() -> SCNNode {
+        let ring = SCNTorus(ringRadius: 0.8, pipeRadius: 0.02)
+        ring.firstMaterial?.diffuse.contents = UIColor.systemIndigo
+        ring.firstMaterial?.lightingModel = .constant
+        ring.firstMaterial?.readsFromDepthBuffer = false
+        let node = SCNNode(geometry: ring)
+        node.renderingOrder = 10
+
+        let target = SCNTorus(ringRadius: 0.8, pipeRadius: 0.11)
+        target.firstMaterial?.colorBufferWriteMask = []
+        target.firstMaterial?.writesToDepthBuffer = false
+        let targetNode = SCNNode(geometry: target)
+        targetNode.name = "gizmo.ring"
+        node.addChildNode(targetNode)
+
+        // A torus is built around Y; the part turns about the bed's up axis.
+        node.simdRotation = SIMD4<Float>(1, 0, 0, .pi / 2)
         return node
     }
 
