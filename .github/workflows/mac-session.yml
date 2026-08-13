@@ -1,0 +1,79 @@
+name: mac-session
+
+# A macOS machine to work on directly, for when the answer needs looking at
+# rather than reasoning about — SceneKit rendering, simulator behaviour, anything
+# where a twenty-minute round trip through CI is the slow part.
+#
+# Start it with `gh workflow run mac-session.yml`, then read the ssh line from the
+# job's log. The environment is the one CI uses, with the dependency caches
+# already restored, so a build is minutes rather than an hour.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How long to hold the machine (max 350)"
+        default: "120"
+      target:
+        description: "Which dependency cache to restore: simulator or device"
+        default: "simulator"
+
+jobs:
+  session:
+    runs-on: macos-26
+    # GitHub stops a job at six hours regardless; this keeps a forgotten session
+    # from holding one of the five macOS runners for that long.
+    timeout-minutes: ${{ fromJSON(inputs.minutes) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point the toolchain at an SDK
+        run: |
+          sdk=$([ "${{ inputs.target }}" = "device" ] && echo iphoneos || echo iphonesimulator)
+          echo "SDKROOT=$(xcrun --sdk $sdk --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - uses: jdx/mise-action@v2
+        with:
+          experimental: true
+
+      - name: Install autotools
+        run: brew install autoconf automake libtool texinfo
+
+      - name: Fetch and patch the engine
+        run: mise run fetch
+
+      - name: Fingerprint the dependency sources
+        id: deps-fp
+        run: |
+          hash=$(find third_party/orcaslicer/deps -type f -print0 \
+                 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      # Read-only: a session is for trying things, and whatever gets built here
+      # should not become what the next CI run starts from.
+      - name: Restore the dependency build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-prefix
+            build/deps
+            build/dl-cache
+          key: deps-${{ inputs.target == 'device' && 'ios' || 'iossim' }}-arm64-${{ steps.deps-fp.outputs.hash }}-
+          restore-keys: |
+            deps-${{ inputs.target == 'device' && 'ios' || 'iossim' }}-arm64-${{ steps.deps-fp.outputs.hash }}-
+
+      - name: Boot an iPad simulator
+        if: inputs.target != 'device'
+        run: |
+          udid=$(xcrun simctl list devices available -j \
+                 | jq -r '[.devices[][] | select(.isAvailable and (.name | test("iPad")))][0].udid // empty')
+          test -n "$udid" || { echo "no iPad simulator available"; exit 1; }
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
+
+      - name: Hold the machine open
+        # Only the keys on the account that started this run can connect, so the
+        # session is not open to whoever reads the log.
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
