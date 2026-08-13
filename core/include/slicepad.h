@@ -116,6 +116,21 @@ sp_result sp_object_transform(sp_engine *engine, int object_index, double *out_v
  * or an explicit transform puts it on the bed. */
 sp_result sp_arrange(sp_engine *engine);
 
+/* Turn the object so the flat face nearest to facing down does face down.
+ *
+ * For a control that tidies up a rough placement: rotate the part roughly, and
+ * this settles it onto the face it was nearly on. It picks the candidate closest
+ * to the current orientation rather than the largest one, so it corrects what was
+ * meant instead of overruling it.
+ *
+ * Candidates come from the convex hull, since a face worth standing on is on the
+ * outside — the floor of a pocket is flat and useless for this — grouped by
+ * normal and weighted by area, ignoring anything under 5mm². The same approach
+ * the desktop's place-on-face gizmo takes, though that code lives in its GUI.
+ *
+ * SP_ERR_STATE when the model has no face large enough to stand on. */
+sp_result sp_place_nearest_face_down(sp_engine *engine, int object_index);
+
 /* Rotate objects into a printable orientation using the desktop's auto-orient
  * algorithm, then drop them back onto the bed. CAD exports are usually oriented
  * for modelling rather than printing, and sp_set_transform only rotates about Z,

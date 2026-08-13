@@ -907,9 +907,96 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 15: snapping to the nearest face. The control it serves tidies up a
+    // rough placement, so what matters is that a part turned slightly off flat
+    // comes back to flat, and that a part already flat is left alone.
+    //
+    // Checked through the bounding box rather than the rotation, because Euler
+    // triples are not unique: the same orientation can be written several ways,
+    // and comparing the numbers fails on parts that are correctly placed.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        auto extent = [](sp_engine *e, float out[3]) {
+            float box[6] = {0};
+            if (sp_object_bounds(e, 0, box) != SP_OK)
+                return false;
+            for (int i = 0; i < 3; ++i)
+                out[i] = box[3 + i] - box[i];
+            return true;
+        };
+
+        if (probe == nullptr) {
+            failures += fail("gate15", "could not create an engine");
+        } else if (sp_load_config(probe, (fixtures + "/model.3mf").c_str()) != SP_OK ||
+                   sp_load_model(probe, (fixtures + "/model-shapr3d.3mf").c_str()) != SP_OK ||
+                   sp_arrange(probe) != SP_OK) {
+            failures += fail("gate15", std::string("setup: ") + sp_last_error(probe));
+        } else {
+            // Snapped first, to get a resting position to perturb. The mesh as
+            // exported is merely unrotated, which is not the same as sitting on a
+            // face — arrange only moves things in X and Y.
+            if (sp_place_nearest_face_down(probe, 0) != SP_OK)
+                failures += fail("gate15", std::string("initial snap: ") + sp_last_error(probe));
+            double flat[6] = {0};
+            sp_object_transform(probe, 0, flat);
+            float flat_size[3] = {0};
+            extent(probe, flat_size);
+
+            // Tipped by a few degrees, the way a part left by a rotation gesture
+            // sits: snapping has to undo it.
+            if (sp_set_transform(probe, 0, flat[0], flat[1] + 7, flat[2] - 4, flat[3],
+                                 flat[4], flat[5]) != SP_OK) {
+                failures += fail("gate15", std::string("tipping: ") + sp_last_error(probe));
+            } else {
+                float tipped_size[3] = {0};
+                extent(probe, tipped_size);
+                if (std::fabs(tipped_size[2] - flat_size[2]) < 0.05)
+                    failures += fail("gate15", "tipping the part did not change its height, "
+                                               "so the rest of this proves nothing");
+
+                if (failures == 0 && sp_place_nearest_face_down(probe, 0) != SP_OK)
+                    failures += fail("gate15", std::string("snapping: ") + sp_last_error(probe));
+
+                float snapped_size[3] = {0};
+                if (failures == 0) {
+                    extent(probe, snapped_size);
+                    for (int i = 0; i < 3 && failures == 0; ++i)
+                        if (std::fabs(snapped_size[i] - flat_size[i]) > 0.05)
+                            failures += fail("gate15", "a tipped part did not come back to the "
+                                                       "resting shape it was nudged from: " +
+                                                           std::to_string(snapped_size[i]) +
+                                                           " against " + std::to_string(flat_size[i]));
+                }
+
+                float box[6] = {0};
+                if (failures == 0 && sp_object_bounds(probe, 0, box) == SP_OK &&
+                    std::fabs(box[2]) > 0.05)
+                    failures += fail("gate15", "the part sits at z " + std::to_string(box[2]) +
+                                                   " rather than on the bed");
+
+                // Snapping an already flat part must not wander onto some other
+                // face, or the control would move things every time it was used.
+                if (failures == 0) {
+                    sp_place_nearest_face_down(probe, 0);
+                    float again[3] = {0};
+                    extent(probe, again);
+                    for (int i = 0; i < 3 && failures == 0; ++i)
+                        if (std::fabs(again[i] - snapped_size[i]) > 0.001)
+                            failures += fail("gate15", "snapping a part already flat moved it");
+                }
+
+                if (failures == 0)
+                    reported("gate15"), std::printf(
+                        "gate15 face snap: nudged to %.1fmm tall, settled back to %.1fmm on the bed\n",
+                        double(tipped_size[2]), double(snapped_size[2]));
+            }
+            sp_engine_destroy(probe);
+        }
+    }
+
     sp_engine_destroy(engine);
 
-    constexpr int kExpectedGates = 14;
+    constexpr int kExpectedGates = 15;
     if (failures == 0 && gates_reported != kExpectedGates)
         failures += fail("suite", "only " + std::to_string(gates_reported) + " of " +
                                       std::to_string(kExpectedGates) +

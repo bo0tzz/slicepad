@@ -513,6 +513,91 @@ sp_result sp_arrange(sp_engine *engine)
     });
 }
 
+sp_result sp_place_nearest_face_down(sp_engine *engine, int object_index)
+{
+    return guard(engine, [&]() -> sp_result {
+        if (!engine->model_loaded || object_index < 0 ||
+            size_t(object_index) >= engine->model.objects.size()) {
+            engine->last_error = "no such object";
+            return SP_ERR_STATE;
+        }
+        ModelObject *object = engine->model.objects[size_t(object_index)];
+        if (object->instances.empty()) {
+            engine->last_error = "object has no instances";
+            return SP_ERR_STATE;
+        }
+
+        // The convex hull, because the faces worth standing a part on are the ones
+        // on its outside — a pocket floor is flat and useless here. This is what
+        // the desktop's place-on-face gizmo does; that code lives in the GUI, so
+        // the approach is borrowed rather than the implementation.
+        const TriangleMesh hull = object->raw_mesh().convex_hull_3d();
+        const std::vector<Vec3f> normals = its_face_normals(hull.its);
+        if (normals.empty()) {
+            engine->last_error = "the model has no faces to stand on";
+            return SP_ERR_STATE;
+        }
+
+        ModelInstance *instance = object->instances.front();
+        const Transform3d rotation = instance->get_matrix_no_offset();
+
+        // Candidate faces are grouped by normal and weighted by area, so a large
+        // flat face beats a chip of one pointing a similar way. The desktop
+        // discards anything under 5mm² for the same reason.
+        struct Candidate { Vec3d normal; double area; };
+        std::vector<Candidate> candidates;
+        for (size_t i = 0; i < normals.size(); ++i) {
+            const stl_triangle_vertex_indices &face = hull.its.indices[i];
+            const Vec3f &a = hull.its.vertices[face(0)];
+            const Vec3f &b = hull.its.vertices[face(1)];
+            const Vec3f &c = hull.its.vertices[face(2)];
+            const double area = 0.5 * double((b - a).cross(c - a).norm());
+            const Vec3d normal = normals[i].cast<double>().normalized();
+
+            auto same = std::find_if(candidates.begin(), candidates.end(),
+                                     [&](const Candidate &existing) {
+                                         return existing.normal.dot(normal) > 0.999;
+                                     });
+            if (same == candidates.end())
+                candidates.push_back({normal, area});
+            else
+                same->area += area;
+        }
+
+        // Nearest to the way the part is already turned, not simply the largest:
+        // this runs after someone has rotated it roughly into place, and the point
+        // is to tidy that up rather than to overrule it. Area breaks ties between
+        // faces pointing much the same way.
+        const Vec3d down(0.0, 0.0, -1.0);
+        const Candidate *best = nullptr;
+        double best_score = -2.0;
+        for (const Candidate &candidate : candidates) {
+            if (candidate.area < 5.0)
+                continue;
+            const Vec3d world = (rotation * candidate.normal).normalized();
+            const double score = world.dot(down) + 1e-6 * std::min(candidate.area, 1000.0);
+            if (score > best_score) {
+                best_score = score;
+                best = &candidate;
+            }
+        }
+        if (best == nullptr) {
+            engine->last_error = "no face large enough to stand this on";
+            return SP_ERR_STATE;
+        }
+
+        const Vec3d world = (rotation * best->normal).normalized();
+        const Eigen::Quaterniond correction = Eigen::Quaterniond::FromTwoVectors(world, down);
+        const Transform3d turned = Transform3d(correction.toRotationMatrix()) * rotation;
+        instance->set_rotation(Geometry::extract_euler_angles(turned));
+
+        object->invalidate_bounding_box();
+        object->ensure_on_bed();
+        engine->mesh = extract_mesh(engine->model);
+        return SP_OK;
+    });
+}
+
 sp_result sp_auto_orient(sp_engine *engine)
 {
     return guard(engine, [&]() -> sp_result {
