@@ -124,7 +124,12 @@ struct PlateView: UIViewRepresentable {
         let framing = geometry.modelGeneration * 1000 + geometry.sliceGeneration
         if context.coordinator.framedGeneration != framing, let bounds = geometry.bounds {
             context.coordinator.framedGeneration = framing
-            frameCamera(context.coordinator, bed: geometry.bed, bounds: bounds)
+            // On the part for a finished slice, on the bed for a new model: one
+            // asks what the print looks like, the other where it sits. At bed zoom
+            // an extrusion is about a pixel and a layer is less, so a print framed
+            // that way is a smudge.
+            let framingBed = geometry.sliceGeneration > 0 && display == .layers ? [] : geometry.bed
+            frameCamera(context.coordinator, bed: framingBed, bounds: bounds)
         }
     }
 
@@ -649,10 +654,10 @@ struct PlateView: UIViewRepresentable {
 
     private func frameCamera(_ coordinator: Coordinator, bed: [SIMD2<Float>],
                              bounds: (min: SIMD3<Float>, max: SIMD3<Float>)) {
-        // Frame the bed, not the part. Framing the part put a 27mm object in the
-        // middle of an empty view with one corner of a 350mm bed drifting past the
-        // top edge — technically correct and useless, because the question a plate
-        // view answers is where the thing sits on the plate. Pinch zooms in.
+        // An empty bed means frame the part instead. Framing the part is wrong for
+        // a model — a 27mm object alone in the view with one corner of a 350mm bed
+        // drifting past the top edge answers nothing about where it sits — and
+        // right for a print, where the whole bed leaves the layers a smudge.
         var centre = (bounds.min + bounds.max) / 2
         var span = max(simd_reduce_max(bounds.max - bounds.min), 50)
         if !bed.isEmpty {
