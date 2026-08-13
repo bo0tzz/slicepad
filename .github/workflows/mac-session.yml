@@ -71,9 +71,37 @@ jobs:
           xcrun simctl bootstatus "$udid" -b
           echo "SIM_UDID=$udid" >> "$GITHUB_ENV"
 
-      - name: Hold the machine open
-        # Only the keys on the account that started this run can connect, so the
-        # session is not open to whoever reads the log.
-        uses: mxschmitt/action-tmate@v3
+      # tmate is driven directly rather than through the action, because the
+      # action only prints the address to the log — and GitHub does not serve a
+      # job's log until the job has finished, which is exactly too late. Publishing
+      # it as an artifact makes it readable while the machine is still up.
+      - name: Open a session
+        run: |
+          brew install tmate
+          # Restricted to the keys on the account that started this run, so the
+          # address being fetchable is not the same as the machine being open.
+          curl -fsSL "https://github.com/${{ github.actor }}.keys" > "$HOME/.tmate_authorized_keys"
+          test -s "$HOME/.tmate_authorized_keys" || { echo "no keys for ${{ github.actor }}"; exit 1; }
+          printf 'set -g tmate-authorized-keys "%s"\n' "$HOME/.tmate_authorized_keys" > "$HOME/.tmate.conf"
+
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          mkdir -p session
+          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' | tee session/ssh.txt
+
+      - name: Publish the address
+        uses: actions/upload-artifact@v4
         with:
-          limit-access-to-actor: true
+          name: mac-session-address
+          path: session/ssh.txt
+
+      - name: Hold the machine open
+        # Ends early when the session leaves a note asking it to, so a finished
+        # session gives the runner back instead of idling to its timeout.
+        run: |
+          echo "Holding for up to ${{ inputs.minutes }} minutes."
+          echo "Run 'touch /tmp/slicepad-done' on the machine to end it early."
+          for _ in $(seq 1 ${{ inputs.minutes }}); do
+            if [ -e /tmp/slicepad-done ]; then echo "asked to finish"; exit 0; fi
+            sleep 60
+          done
