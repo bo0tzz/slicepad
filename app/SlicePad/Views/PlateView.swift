@@ -134,6 +134,12 @@ struct PlateView: UIViewRepresentable {
             // stops describing what the fingers are doing.
             pitch = min(max(pitch, 0.05), 1.5)
             distance = min(max(distance, 10), 3000)
+            // Clamping the pitch is not enough to stay above the plate, because
+            // panning moves what the camera looks at: raise the target far enough
+            // and the camera passes under the bed, where every surface faces away
+            // from the light and the scene goes black. There is no view of a print
+            // from underneath the bed worth having.
+            target.y = max(target.y, 0)
 
             let horizontal = distance * cos(pitch)
             cameraNode.simdPosition = target + SIMD3<Float>(horizontal * sin(yaw),
