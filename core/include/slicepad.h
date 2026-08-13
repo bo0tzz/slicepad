@@ -190,6 +190,66 @@ sp_result sp_object_bounds(sp_engine *engine, int object_index, float *out_min_m
 size_t sp_toolpath_segment_count(const sp_engine *engine);
 const float *sp_toolpath_segments(const sp_engine *engine);
 
+/* What each segment is, where it sits and how big it is: one entry per segment in
+ * each of these, in the same order as sp_toolpath_segments, so index i describes
+ * the segment at floats [i*6, i*6+6). Same ownership as the coordinates —
+ * engine-owned, valid until the next sp_slice, NULL when the count is zero.
+ *
+ * Parallel arrays rather than one array of structs, because a struct crossing
+ * this boundary would tie the two sides together by padding and alignment, which
+ * is the kind of agreement that breaks silently. These are read once per slice
+ * and indexed thereafter, so the extra calls cost nothing.
+ *
+ * Roles are ours rather than libslic3r's. Its ExtrusionRole is an implementation
+ * detail that gains and reorders values between versions, and it draws
+ * distinctions a viewer cannot act on; these are the groups worth a colour:
+ *
+ *   - the two wall roles are separate because the outer one is the surface you
+ *     see and the inner one is not
+ *   - sparse and solid infill are separate because their density is the thing
+ *     someone is usually looking for
+ *   - bridges are separate because they print over air, which is where a print
+ *     most often fails
+ *   - support and skirt/brim are separate because they are not the part
+ *
+ * Roles that lose a distinction here: overhang perimeters are reported as outer
+ * wall, since they are the outside surface and Orca's own separation of them is
+ * about speed and cooling rather than about where the line sits; gap fill is
+ * OTHER rather than being folded into walls or infill, because it is neither and
+ * pretending otherwise would misdescribe what is on screen.
+ *
+ * Layer indices are zero-based and non-decreasing through the buffer, so a layer
+ * range selects a contiguous run. sp_toolpath_layer_count is how many layers
+ * contain extrusions, which is what a layer control should scrub over; it agrees
+ * with layer_count in sp_slice_stats_json. */
+typedef enum {
+    SP_ROLE_OTHER = 0,
+    SP_ROLE_OUTER_WALL = 1,
+    SP_ROLE_INNER_WALL = 2,
+    SP_ROLE_INFILL = 3,
+    SP_ROLE_SOLID_INFILL = 4,
+    SP_ROLE_BRIDGE = 5,
+    SP_ROLE_SUPPORT = 6,
+    SP_ROLE_SKIRT_BRIM = 7,
+} sp_extrusion_role;
+
+/* One byte per segment, each an sp_extrusion_role. A byte rather than the enum's
+ * own width because this is a buffer a renderer walks, and a real print has
+ * hundreds of thousands of segments. */
+const unsigned char *sp_toolpath_roles(const sp_engine *engine);
+const unsigned *sp_toolpath_layers(const sp_engine *engine);
+
+/* The extruded cross-section in millimetres, as the slicer planned it: the width
+ * of the line on the bed and the height of the layer it belongs to. Drawing a
+ * segment at these dimensions is what makes a layer view look like the object
+ * being built rather than a wireframe of its centre lines, and they are not
+ * constant — first layers, solid infill and bridges all differ from the walls
+ * around them. */
+const float *sp_toolpath_widths(const sp_engine *engine);
+const float *sp_toolpath_heights(const sp_engine *engine);
+
+size_t sp_toolpath_layer_count(const sp_engine *engine);
+
 /* The configuration the next slice would use — the loaded profile plus any
  * overrides — as "key = value" lines sorted by key. That is deliberately the
  * same shape Orca embeds in its own G-code, so

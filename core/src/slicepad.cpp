@@ -42,7 +42,14 @@ struct sp_engine {
     std::string last_error;
     std::string stats_json = "{}";
     std::string config_text;
+    // Parallel to each other: one role and one layer index per six floats of
+    // toolpath. Filled together by extract_toolpath and never separately.
     std::vector<float> toolpath;   // packed x1,y1,z1,x2,y2,z2 per segment
+    std::vector<unsigned char> toolpath_roles;
+    std::vector<unsigned> toolpath_layers;
+    std::vector<float> toolpath_widths;
+    std::vector<float> toolpath_heights;
+    size_t toolpath_layer_count = 0;
     std::vector<float> mesh;       // packed 9 floats per triangle, bed coords
     std::vector<float> bed;        // packed x,y per printable-area point
     int repaired_errors = 0;
@@ -182,22 +189,66 @@ std::vector<float> extract_bed(const DynamicPrintConfig &config)
     return points;
 }
 
-std::vector<float> extract_toolpath(const GCodeProcessorResult &result)
+// The grouping is explained in slicepad.h, where a caller can read it.
+unsigned char map_role(ExtrusionRole role)
 {
+    switch (role) {
+    case erExternalPerimeter:
+    case erOverhangPerimeter:        return SP_ROLE_OUTER_WALL;
+    case erPerimeter:                return SP_ROLE_INNER_WALL;
+    case erInternalInfill:           return SP_ROLE_INFILL;
+    case erSolidInfill:
+    case erTopSolidInfill:
+    case erBottomSurface:
+    case erIroning:                  return SP_ROLE_SOLID_INFILL;
+    case erBridgeInfill:
+    case erInternalBridgeInfill:     return SP_ROLE_BRIDGE;
+    case erSupportMaterial:
+    case erSupportMaterialInterface:
+    case erSupportTransition:        return SP_ROLE_SUPPORT;
+    case erSkirt:
+    case erBrim:                     return SP_ROLE_SKIRT_BRIM;
+    default:                         return SP_ROLE_OTHER;
+    }
+}
+
+struct Toolpath {
     std::vector<float> segments;
+    std::vector<unsigned char> roles;
+    std::vector<unsigned> layers;
+    std::vector<float> widths;
+    std::vector<float> heights;
+    size_t layer_count = 0;
+};
+
+Toolpath extract_toolpath(const GCodeProcessorResult &result)
+{
+    Toolpath out;
     bool have_previous = false;
     Vec3f previous = Vec3f::Zero();
+    unsigned highest_layer = 0;
+    bool saw_layer = false;
 
     for (const auto &move : result.moves) {
         if (move.type == EMoveType::Extrude && have_previous) {
-            segments.insert(segments.end(), {previous.x(), previous.y(), previous.z(),
-                                             move.position.x(), move.position.y(),
-                                             move.position.z()});
+            out.segments.insert(out.segments.end(),
+                                {previous.x(), previous.y(), previous.z(),
+                                 move.position.x(), move.position.y(),
+                                 move.position.z()});
+            // The move being examined is the one doing the extruding; the
+            // previous position only says where it started.
+            out.roles.push_back(map_role(move.extrusion_role));
+            out.layers.push_back(move.layer_id);
+            out.widths.push_back(move.width);
+            out.heights.push_back(move.height);
+            highest_layer = std::max(highest_layer, move.layer_id);
+            saw_layer = true;
         }
         previous = move.position;
         have_previous = true;
     }
-    return segments;
+    out.layer_count = saw_layer ? size_t(highest_layer) + 1 : 0;   // ids are 0-based
+    return out;
 }
 
 std::string summarise(const Print &print, const GCodeProcessorResult &result,
@@ -771,7 +822,13 @@ sp_result sp_slice(sp_engine *engine, const char *out_gcode_path,
         }
 
         engine->stats_json = summarise(print, result, config);
-        engine->toolpath = extract_toolpath(result);
+        Toolpath toolpath = extract_toolpath(result);
+        engine->toolpath = std::move(toolpath.segments);
+        engine->toolpath_roles = std::move(toolpath.roles);
+        engine->toolpath_layers = std::move(toolpath.layers);
+        engine->toolpath_widths = std::move(toolpath.widths);
+        engine->toolpath_heights = std::move(toolpath.heights);
+        engine->toolpath_layer_count = toolpath.layer_count;
         return SP_OK;
     });
 }
@@ -853,6 +910,36 @@ size_t sp_toolpath_segment_count(const sp_engine *engine)
 const float *sp_toolpath_segments(const sp_engine *engine)
 {
     return (engine != nullptr && !engine->toolpath.empty()) ? engine->toolpath.data() : nullptr;
+}
+
+const unsigned char *sp_toolpath_roles(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->toolpath_roles.empty()) ? engine->toolpath_roles.data()
+                                                                  : nullptr;
+}
+
+const unsigned *sp_toolpath_layers(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->toolpath_layers.empty()) ? engine->toolpath_layers.data()
+                                                                   : nullptr;
+}
+
+const float *sp_toolpath_widths(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->toolpath_widths.empty()) ? engine->toolpath_widths.data()
+                                                                   : nullptr;
+}
+
+const float *sp_toolpath_heights(const sp_engine *engine)
+{
+    return (engine != nullptr && !engine->toolpath_heights.empty())
+               ? engine->toolpath_heights.data()
+               : nullptr;
+}
+
+size_t sp_toolpath_layer_count(const sp_engine *engine)
+{
+    return engine ? engine->toolpath_layer_count : 0;
 }
 
 const char *sp_engine_version(void) { return SoftFever_VERSION; }
