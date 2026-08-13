@@ -945,7 +945,13 @@ int main(int argc, char **argv)
 
             // Tipped by a few degrees, the way a part left by a rotation gesture
             // sits: snapping has to undo it.
-            if (sp_set_transform(probe, 0, flat[0], flat[1] + 7, flat[2] - 4, flat[3],
+            //
+            // Deliberately a small nudge. This fixture has another face 16.5° from
+            // the one it rests on, so a larger tip leaves the two nearly equally
+            // close to down and which one wins comes down to floating point — the
+            // gate then passes on x86-64 and fails on arm64, describing the
+            // architecture rather than the code.
+            if (sp_set_transform(probe, 0, flat[0], flat[1] + 3, flat[2] - 2, flat[3],
                                  flat[4], flat[5]) != SP_OK) {
                 failures += fail("gate15", std::string("tipping: ") + sp_last_error(probe));
             } else {
