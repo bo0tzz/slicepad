@@ -111,6 +111,10 @@ final class Engine {
     }
 
     func autoOrient() throws { try check(sp_auto_orient(handle)) }
+
+    func placeNearestFaceDown(object: Int = 0) throws {
+        try check(sp_place_nearest_face_down(handle, Int32(object)))
+    }
     func arrange() throws { try check(sp_arrange(handle)) }
 
     // MARK: Slicing

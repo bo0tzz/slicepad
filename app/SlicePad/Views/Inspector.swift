@@ -66,6 +66,13 @@ struct Inspector: View {
                         Button("Arrange") { model.arrange() }
                     }
                     .buttonStyle(.bordered)
+
+                    Toggle("Settle on a flat face", isOn: $model.snapToFace)
+                    if model.snapToFace {
+                        Text("Turn the part roughly; it drops onto the nearest flat "
+                             + "face when you let go.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Settings") {

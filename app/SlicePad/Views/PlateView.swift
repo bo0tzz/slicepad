@@ -11,6 +11,9 @@ struct PlateView: UIViewRepresentable {
     let display: AppModel.Display
     /// Which layers the layer view shows; nil is all of them.
     var visibleLayers: ClosedRange<UInt32>?
+    /// Whether the rings snap to 15°. Off while the part is being settled onto a
+    /// face instead, where a grid of angles is only in the way.
+    var snapAngles = true
     /// Where the object was dragged to, in bed millimetres, once the finger lifts.
     var onMove: ((Double, Double) -> Void)?
     /// All three angles in degrees, once a ring is released. The current values
@@ -143,6 +146,7 @@ struct PlateView: UIViewRepresentable {
         var onMove: ((Double, Double) -> Void)?
         var onRotate: ((Double, Double, Double) -> Void)?
         var objectOffset = SIMD2<Float>(0, 0)
+        var snapAngles = true
         var rotation = SIMD3<Float>(0, 0, 0)
 
         weak var modelNode: SCNNode?
@@ -312,7 +316,7 @@ struct PlateView: UIViewRepresentable {
                 let free = simd_length(point - gizmoCentre) > ringRadius * 2
                 let held = Double(rotation[index])
                 var absolute = held + Double(now - startAngle) * 180 / .pi
-                if !free {
+                if !free && snapAngles {
                     absolute = (absolute / 15).rounded() * 15
                 }
 

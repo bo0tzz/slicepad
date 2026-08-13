@@ -140,6 +140,7 @@ struct ContentView: View {
         } else {
             PlateView(geometry: model.geometry, display: model.display,
                       visibleLayers: model.visibleLayers,
+                      snapAngles: !model.snapToFace,
                       onMove: { x, y in model.moveObject(x: x, y: y) },
                       onRotate: { x, y, z in model.rotateObject(x: x, y: y, z: z) })
         }

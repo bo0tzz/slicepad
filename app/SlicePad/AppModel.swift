@@ -35,6 +35,16 @@ final class AppModel: ObservableObject {
     /// like inspecting one slice in isolation.
     @Published var topLayer: UInt32 = 0
 
+    /// Whether a rotation settles onto the nearest flat face when the finger lifts.
+    /// While it is on the rings do not snap to 15°: the target is a face, and a
+    /// grid of angles only fights it.
+    /// Written through by hand rather than with @AppStorage, which is built for
+    /// views: inside an observable object it stores the value but publishes
+    /// nothing, so the control would not follow its own state.
+    @Published var snapToFace = UserDefaults.standard.bool(forKey: "snapToFace") {
+        didSet { UserDefaults.standard.set(snapToFace, forKey: "snapToFace") }
+    }
+
     var layerCount: Int { geometry.layerCount }
     var visibleLayers: ClosedRange<UInt32>? {
         guard display == .layers, geometry.layerCount > 0 else { return nil }
@@ -152,6 +162,13 @@ final class AppModel: ObservableObject {
         rotateZ = z
         run { host in
             try await host.setRotation(x: x, y: y, z: z)
+            // Turned roughly by hand, then settled onto the face it was nearly on.
+            // Done here rather than in the view because it changes all three angles,
+            // and the engine is where they live.
+            if self.snapToFace {
+                await host.settleOnNearestFace()
+                self.rotateZ = await host.rotationZ()
+            }
             await self.refreshGeometry()
         }
     }

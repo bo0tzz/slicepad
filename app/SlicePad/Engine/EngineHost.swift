@@ -144,6 +144,14 @@ final class EngineHost: @unchecked Sendable {
         try await perform { try $0.autoOrient() }
     }
 
+    /// Settles the part onto whichever flat face is nearest to facing down. Errors
+    /// are swallowed on purpose: a part with no face large enough to stand on is a
+    /// normal thing to be holding, and the rotation the person just made is still
+    /// theirs to keep.
+    func settleOnNearestFace() async {
+        try? await perform { try $0.placeNearestFaceDown() }
+    }
+
     /// What the Z control should read after the engine has placed the object itself.
     func rotationZ() async -> Double {
         await perform { $0.transform()?[3] ?? 0 }
