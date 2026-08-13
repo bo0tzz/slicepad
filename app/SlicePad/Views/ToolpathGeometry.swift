@@ -39,8 +39,11 @@ enum ToolpathGeometry {
 
         var vertices: [SCNVector3] = []
         var normals: [SCNVector3] = []
-        var colours: [SIMD4<Float>] = []
-        var indices: [Int32] = []
+        // Indices per role rather than a colour per vertex. SceneKit's vertex
+        // colours need the material to agree about how they are consumed, and got
+        // this drawn in the dark; a geometry element per role with its own material
+        // is the plain way to say the same thing.
+        var indicesByRole: [UInt8: [Int32]] = [:]
         vertices.reserveCapacity(segments * 8)
 
         for segment in 0 ..< segments {
@@ -64,10 +67,7 @@ enum ToolpathGeometry {
 
             let halfWidth = plate.widths[segment] / 2
             let halfHeight = plate.heights[segment] / 2
-            // Centred on the line the engine reports, which is the middle of the
-            // extrusion rather than its base.
             let base = Int32(vertices.count)
-            let colour = colourComponents(plate.roles[segment])
 
             for point in [start, end] {
                 for (offset, normal) in [(sideways * halfWidth, sideways),
@@ -77,43 +77,37 @@ enum ToolpathGeometry {
                     let at = point + offset
                     vertices.append(SCNVector3(at.x, at.y, at.z))
                     normals.append(SCNVector3(normal.x, normal.y, normal.z))
-                    colours.append(colour)
                 }
             }
 
             // Four sides joining the two diamonds, each two triangles.
+            var indices = indicesByRole[plate.roles[segment], default: []]
             for side in Int32(0) ..< 4 {
                 let next = (side + 1) % 4
                 indices += [base + side, base + 4 + side, base + 4 + next,
                             base + side, base + 4 + next, base + next]
             }
+            indicesByRole[plate.roles[segment]] = indices
         }
 
-        guard !indices.isEmpty else { return nil }
+        guard !indicesByRole.isEmpty else { return nil }
 
-        let colourData = colours.withUnsafeBufferPointer { Data(buffer: $0) }
+        let roles = indicesByRole.keys.sorted()
         let geometry = SCNGeometry(
-            sources: [
-                SCNGeometrySource(vertices: vertices),
-                SCNGeometrySource(normals: normals),
-                SCNGeometrySource(data: colourData, semantic: .color,
-                                  vectorCount: colours.count, usesFloatComponents: true,
-                                  componentsPerVector: 4,
-                                  bytesPerComponent: MemoryLayout<Float>.size,
-                                  dataOffset: 0,
-                                  dataStride: MemoryLayout<SIMD4<Float>>.stride),
-            ],
-            elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
+            sources: [SCNGeometrySource(vertices: vertices),
+                      SCNGeometrySource(normals: normals)],
+            elements: roles.map {
+                SCNGeometryElement(indices: indicesByRole[$0] ?? [], primitiveType: .triangles)
+            }
         )
-        geometry.firstMaterial?.lightingModel = .lambert
-        geometry.firstMaterial?.diffuse.contents = UIColor.white
+        geometry.materials = roles.map { role in
+            let material = SCNMaterial()
+            material.diffuse.contents = colour(for: role)
+            material.lightingModel = .lambert
+            material.isDoubleSided = true
+            return material
+        }
         return SCNNode(geometry: geometry)
-    }
-
-    private static func colourComponents(_ role: UInt8) -> SIMD4<Float> {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        colour(for: role).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        return SIMD4(Float(red), Float(green), Float(blue), Float(alpha))
     }
 
     /// The fallback, and what the view used to draw everywhere.
