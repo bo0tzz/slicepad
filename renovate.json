@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Actions and build tools move often and matter little on their own; one pull request a week beats five.",
+      "matchManagers": ["github-actions", "mise"],
+      "groupName": "tooling",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "cmake stays on 3.x. OrcaSlicer's bundled deps_src still declare cmake_minimum_required(VERSION 3.5), which 4.x accepts only grudgingly and will drop.",
+      "matchManagers": ["mise"],
+      "matchPackageNames": ["cmake"],
+      "allowedVersions": "<4"
+    },
+    {
+      "description": "The engine pin is not an ordinary dependency: every patch in patches/ is written against this commit, and a bump means rebasing the stack and regenerating testdata/reference.gcode, which is the oracle the gates compare against. The pull request is a prompt to do that work, not something to merge.",
+      "matchDepNames": ["SoftFever/OrcaSlicer"],
+      "dependencyDashboardApproval": true,
+      "addLabels": ["engine-bump"],
+      "prBodyNotes": [
+        "This will fail CI until `patches/*.patch` are rebased with `scripts/regen-patch.sh` and `testdata/reference.gcode` is regenerated from the matching desktop build. See `patches/README.md`."
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "The pinned OrcaSlicer checkout, kept as a tag and its commit so the fetch can verify what it got.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^scripts/fetch-orca\\.sh$/"],
+      "matchStrings": [
+        "ORCA_TAG=\"(?<currentValue>[^\"]+)\"\\s*\\nORCA_SHA=\"(?<currentDigest>[^\"]+)\""
+      ],
+      "depNameTemplate": "SoftFever/OrcaSlicer",
+      "datasourceTemplate": "github-tags"
+    }
+  ]
+}
