@@ -138,7 +138,8 @@ struct ContentView: View {
                      : "Open a model to slice.")
             }
         } else {
-            PlateView(geometry: model.geometry, display: model.display)
+            PlateView(geometry: model.geometry, display: model.display,
+                      onMove: { x, y in model.moveObject(x: x, y: y) })
         }
     }
 }

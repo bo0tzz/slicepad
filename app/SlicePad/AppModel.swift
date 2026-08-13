@@ -123,6 +123,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Called when a drag on the plate finishes, with the object's new position in
+    /// bed millimetres. Nothing is sent while the finger moves: the view slides the
+    /// object itself, and the engine hears about it once.
+    func moveObject(x: Double, y: Double) {
+        run { host in
+            try await host.setPosition(x: x, y: y)
+            await self.refreshGeometry()
+        }
+    }
+
     func autoOrient() {
         run { host in
             try await host.autoOrient()

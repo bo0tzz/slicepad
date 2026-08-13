@@ -9,6 +9,8 @@ import UIKit
 struct PlateView: UIViewRepresentable {
     let geometry: PlateGeometry
     let display: AppModel.Display
+    /// Where the object was dragged to, in bed millimetres, once the finger lifts.
+    var onMove: ((Double, Double) -> Void)?
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -57,6 +59,8 @@ struct PlateView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
+        context.coordinator.onMove = onMove
+        context.coordinator.objectOffset = geometry.offset
         guard let root = view.scene?.rootNode.childNode(withName: "root", recursively: false) else { return }
 
         // SwiftUI re-runs this for any state change at all, progress ticks included.
@@ -72,7 +76,10 @@ struct PlateView: UIViewRepresentable {
 
         switch display {
         case .model:
-            if let node = solidNode(geometry.triangles) { root.addChildNode(node) }
+            if let node = solidNode(geometry.triangles) {
+            node.name = "model"
+            root.addChildNode(node)
+        }
         case .layers:
             if let node = toolpathNode(geometry.toolpath) {
                 root.addChildNode(node)
@@ -107,6 +114,14 @@ struct PlateView: UIViewRepresentable {
         var framedGeneration: Int?
 
         weak var view: SCNView?
+        var onMove: ((Double, Double) -> Void)?
+        var objectOffset = SIMD2<Float>(0, 0)
+
+        /// Set when a drag started on the model, so the same one-finger gesture
+        /// moves the part instead of orbiting — which is how every slicer behaves,
+        /// and means a drag that starts on empty plate still turns the view.
+        private var dragStart: SIMD2<Float>?
+        private weak var dragged: SCNNode?
         weak var truckGesture: UIPanGestureRecognizer?
         weak var dollyGesture: UIPinchGestureRecognizer?
 
@@ -155,12 +170,56 @@ struct PlateView: UIViewRepresentable {
 
         @objc func orbit(_ gesture: UIPanGestureRecognizer) {
             guard let view else { return }
+
+            if gesture.state == .began {
+                let location = gesture.location(in: view)
+                let hit = view.hitTest(location, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
+                    .first(where: { $0.node.name == "model" })
+                dragged = hit?.node
+                dragStart = hit == nil ? nil : bedPoint(at: location)
+            }
+
+            if let dragged, let dragStart, let now = bedPoint(at: gesture.location(in: view)) {
+                // The node is moved here and the engine told once, at the end.
+                // Re-transforming the mesh for every touch event would mean pulling
+                // a whole model's triangles across the ABI several times a second.
+                let delta = now - dragStart
+                dragged.simdPosition = SIMD3<Float>(delta.x, 0, -delta.y)
+                if gesture.state == .ended || gesture.state == .cancelled {
+                    onMove?(Double(objectOffset.x + delta.x), Double(objectOffset.y + delta.y))
+                    self.dragged = nil
+                    self.dragStart = nil
+                }
+                gesture.setTranslation(.zero, in: view)
+                return
+            }
+
             let movement = gesture.translation(in: view)
             gesture.setTranslation(.zero, in: view)
 
             yaw -= Float(movement.x) * orbitSpeed
             pitch += Float(movement.y) * orbitSpeed
             apply()
+        }
+
+        /// Where a screen point lands on the bed, in engine millimetres. Taken by
+        /// intersecting the ray through that point with the bed plane rather than
+        /// scaling the finger's movement, so the part stays under the finger at any
+        /// angle and any zoom.
+        private func bedPoint(at location: CGPoint) -> SIMD2<Float>? {
+            guard let view else { return nil }
+            let near = view.unprojectPoint(SCNVector3(Float(location.x), Float(location.y), 0))
+            let far = view.unprojectPoint(SCNVector3(Float(location.x), Float(location.y), 1))
+            let origin = SIMD3<Float>(near.x, near.y, near.z)
+            let direction = SIMD3<Float>(far.x, far.y, far.z) - origin
+            guard abs(direction.y) > 1e-6 else { return nil }
+
+            // The bed is the plane y = 0 in scene space, and engine (x, y) is scene
+            // (x, -z).
+            let t = -origin.y / direction.y
+            guard t > 0 else { return nil }
+            let hit = origin + direction * t
+            return SIMD2<Float>(hit.x, -hit.z)
         }
 
         @objc func truck(_ gesture: UIPanGestureRecognizer) {

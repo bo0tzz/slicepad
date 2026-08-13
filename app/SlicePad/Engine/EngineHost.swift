@@ -8,6 +8,10 @@ struct PlateGeometry {
     var toolpath: [SIMD3<Float>] = []
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)?
 
+    /// Where the object sits on the bed, so a drag can start from it rather than
+    /// from wherever the finger landed on the mesh.
+    var offset = SIMD2<Float>(0, 0)
+
     /// Bumped whenever the engine is read again. The view rebuilds on a change of
     /// this rather than on a change of the arrays: a progress tick redraws the whole
     /// UI a hundred times during a slice, and comparing a few hundred thousand
@@ -137,10 +141,20 @@ final class EngineHost: @unchecked Sendable {
         try await perform { try $0.arrange() }
     }
 
-    /// Applies just the two controls the app exposes, keeping everything else where
-    /// the engine already has it: the X and Y rotation auto-orient chose, and the
-    /// position the object was placed at. sp_set_transform is absolute in every
-    /// argument, so passing zeros for those would silently undo both.
+    /// Moves the object on the bed, keeping everything else where it is. Every
+    /// argument of sp_set_transform is absolute, so anything not being changed has
+    /// to be read back and passed through.
+    func setPosition(x: Double, y: Double) async throws {
+        try await perform { engine in
+            let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
+            try engine.setTransform(scale: current[0], rotateX: current[1],
+                                    rotateY: current[2], rotateZ: current[3],
+                                    translateX: x, translateY: y)
+        }
+    }
+
+    /// Applies the two controls the app exposes, keeping the X and Y rotation
+    /// auto-orient chose and the position the object sits at — same reason.
     func setScaleAndRotation(scale: Double, rotateZ: Double) async throws {
         try await perform { engine in
             let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
@@ -162,13 +176,17 @@ final class EngineHost: @unchecked Sendable {
     /// One call for everything the view draws, so a redraw cannot mix geometry from
     /// two different engine states.
     func geometry(includeToolpath: Bool) async -> PlateGeometry {
-        await perform { engine in
-            PlateGeometry(
+        await perform { engine -> PlateGeometry in
+            var geometry = PlateGeometry(
                 bed: engine.bedOutline(),
                 triangles: engine.meshTriangles(),
                 toolpath: includeToolpath ? engine.toolpathSegments() : [],
                 bounds: engine.objectCount > 0 ? engine.objectBounds() : nil
             )
+            if let placement = engine.transform() {
+                geometry.offset = SIMD2(Float(placement[4]), Float(placement[5]))
+            }
+            return geometry
         }
     }
 }
