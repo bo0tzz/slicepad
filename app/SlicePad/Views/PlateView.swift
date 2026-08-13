@@ -130,8 +130,7 @@ struct PlateView: UIViewRepresentable {
         struct State: Equatable {
             let revision: Int
             let display: AppModel.Display
-    /// Which layers the layer view shows; nil is all of them.
-    var visibleLayers: ClosedRange<UInt32>?
+            let layers: ClosedRange<UInt32>?
         }
 
         var state: State?
