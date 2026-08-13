@@ -23,7 +23,23 @@ struct PlateView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.scene = SCNScene()
-        view.autoenablesDefaultLighting = true
+        // Lit explicitly rather than with autoenablesDefaultLighting, which gives
+        // one light and no ambient: a toolpath is thousands of small surfaces
+        // facing every direction, and the ones facing away from a single light
+        // render pure black. The solid model got away with it because its faces are
+        // few and large.
+        let ambient = SCNNode()
+        ambient.light = SCNLight()
+        ambient.light?.type = .ambient
+        ambient.light?.intensity = 600
+        view.scene?.rootNode.addChildNode(ambient)
+
+        // Carried by the camera, so turning the plate does not swing a part into
+        // shadow.
+        let key = SCNNode()
+        key.light = SCNLight()
+        key.light?.type = .directional
+        key.light?.intensity = 700
         // Darker than the plate, so the bed reads as a surface sitting in space
         // rather than as an outline drawn on the background.
         view.backgroundColor = .systemGray5
@@ -39,6 +55,7 @@ struct PlateView: UIViewRepresentable {
         // pinch are competing recognisers, so a one-handed pinch while panning is
         // dropped, and its inertia throws the view across the plate on release.
         view.allowsCameraControl = false
+        context.coordinator.cameraNode.addChildNode(key)
         view.scene?.rootNode.addChildNode(context.coordinator.cameraNode)
         view.pointOfView = context.coordinator.cameraNode
         context.coordinator.view = view
