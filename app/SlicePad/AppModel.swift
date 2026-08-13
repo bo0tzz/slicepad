@@ -73,6 +73,7 @@ final class AppModel: ObservableObject {
     private var host: EngineHost?
     private var cancelFlag = CancelFlag()
     private var modelGeneration = 0
+    private var sliceGeneration = 0
     private var transformToken = 0
 
     var canSlice: Bool { profileName != nil && modelName != nil && !isSlicing }
@@ -237,6 +238,7 @@ final class AppModel: ObservableObject {
                 }
                 self.stats = stats
                 self.gcodeURL = output
+                self.sliceGeneration += 1
                 self.display = .layers
                 await self.refreshGeometry()
             } catch let error as EngineError where error.isCancellation {
@@ -287,6 +289,7 @@ final class AppModel: ObservableObject {
         var fresh = await host.geometry(includeToolpath: display == .layers)
         fresh.revision = geometry.revision + 1
         fresh.modelGeneration = modelGeneration
+        fresh.sliceGeneration = sliceGeneration
         geometry = fresh
         // A fresh slice shows the whole print; the control starts at the top and is
         // pulled down, rather than starting at nothing.

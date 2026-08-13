@@ -119,9 +119,11 @@ struct PlateView: UIViewRepresentable {
         // Only a newly opened model reframes. Switching between the model and the
         // layers is a change of what is drawn, not of what you are looking at, and
         // moving the camera there throws away wherever the user had put it.
-        if context.coordinator.framedGeneration != geometry.modelGeneration,
-           let bounds = geometry.bounds {
-            context.coordinator.framedGeneration = geometry.modelGeneration
+        // Framed for a new model and for a new slice, but never for a change of
+        // view — switching between them keeps the camera where it was put.
+        let framing = geometry.modelGeneration * 1000 + geometry.sliceGeneration
+        if context.coordinator.framedGeneration != framing, let bounds = geometry.bounds {
+            context.coordinator.framedGeneration = framing
             frameCamera(context.coordinator, bed: geometry.bed, bounds: bounds)
         }
     }

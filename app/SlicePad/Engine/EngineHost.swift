@@ -30,6 +30,12 @@ struct PlateGeometry {
     /// floats to discover nothing moved is its own kind of waste.
     var revision = 0
 
+    /// Bumped when a slice finishes. The camera follows this as well as
+    /// modelGeneration: a print is worth looking at closely, and at the zoom that
+    /// shows a whole 350mm bed an extrusion is thinner than a pixel — thousands of
+    /// them alias into a dark smudge that looks like a rendering fault.
+    var sliceGeneration = 0
+
     /// Bumped only when a different model is loaded. The camera follows this, not
     /// `revision`: it should frame a newly opened part, but must not snap back to
     /// its default every time a slider moves the one you are already looking at.
