@@ -85,10 +85,8 @@ void shade_triangle(std::vector<unsigned char> &pixels, std::vector<float> &dept
     }
 }
 
-} // namespace
-
-bool render_mesh(const std::vector<float> &mesh, unsigned width, unsigned height,
-                 bool transparent_background, std::vector<unsigned char> &pixels)
+bool render_exact(const std::vector<float> &mesh, unsigned width, unsigned height,
+                  bool transparent_background, std::vector<unsigned char> &pixels)
 {
     pixels.assign(size_t(width) * height * 4, 0);
     if (!transparent_background)
@@ -145,6 +143,56 @@ bool render_mesh(const std::vector<float> &mesh, unsigned width, unsigned height
         const auto grey = static_cast<unsigned char>(90.0f + 150.0f * std::min(lighting, 1.0f));
 
         shade_triangle(pixels, depth, width, height, v, grey);
+    }
+    return true;
+}
+
+} // namespace
+
+bool render_mesh(const std::vector<float> &mesh, unsigned width, unsigned height,
+                 bool transparent_background, std::vector<unsigned char> &pixels)
+{
+    // Rendered larger and averaged down. A triangle covers a pixel or it does
+    // not — there is no coverage to shade with — so every silhouette comes out
+    // as stair steps at thumbnail sizes. Three times is enough to read as smooth
+    // and costs nine times a few hundred kilobytes.
+    constexpr unsigned kSupersample = 3;
+    const unsigned wide = width * kSupersample;
+    const unsigned tall = height * kSupersample;
+    if (width == 0 || height == 0 || wide / kSupersample != width)
+        return render_exact(mesh, width, height, transparent_background, pixels);
+
+    std::vector<unsigned char> large;
+    if (!render_exact(mesh, wide, tall, transparent_background, large))
+        return false;
+
+    pixels.assign(size_t(width) * height * 4, 0);
+    for (unsigned y = 0; y < height; ++y) {
+        for (unsigned x = 0; x < width; ++x) {
+            // Averaged with alpha weighting the colour, so a half-covered edge
+            // against a transparent background keeps the shade of the part
+            // rather than being dragged towards the empty pixels it borders.
+            unsigned alpha = 0, red = 0, green = 0, blue = 0;
+            for (unsigned dy = 0; dy < kSupersample; ++dy) {
+                for (unsigned dx = 0; dx < kSupersample; ++dx) {
+                    const unsigned char *p =
+                        &large[((size_t(y) * kSupersample + dy) * wide +
+                                size_t(x) * kSupersample + dx) * 4];
+                    alpha += p[3];
+                    red += unsigned(p[0]) * p[3];
+                    green += unsigned(p[1]) * p[3];
+                    blue += unsigned(p[2]) * p[3];
+                }
+            }
+            unsigned char *out = &pixels[(size_t(y) * width + x) * 4];
+            constexpr unsigned samples = kSupersample * kSupersample;
+            out[3] = static_cast<unsigned char>(alpha / samples);
+            if (alpha > 0) {
+                out[0] = static_cast<unsigned char>(red / alpha);
+                out[1] = static_cast<unsigned char>(green / alpha);
+                out[2] = static_cast<unsigned char>(blue / alpha);
+            }
+        }
     }
     return true;
 }
