@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -907,9 +908,204 @@ int main(int argc, char **argv)
         }
     }
 
+    // Gate 15: the per-segment description a layer view is built from. The
+    // coordinates alone only draw centre lines; these say what each line is, which
+    // layer it belongs to and how much material it lays down, and a view that
+    // colours or scrubs by them is wrong in a way that looks plausible if any of
+    // it is misaligned with the coordinate buffer.
+    if (failures == 0) {
+        sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
+        if (probe == nullptr) {
+            failures += fail("gate15", "could not create an engine");
+        } else {
+            const std::string profile = fixtures + "/model.3mf";
+            const std::string mesh = fixtures + "/model-shapr3d.3mf";
+            const std::string path = work + "/segments.gcode";
+
+            if (sp_load_config(probe, profile.c_str()) != SP_OK ||
+                sp_load_model(probe, mesh.c_str()) != SP_OK ||
+                sp_auto_orient(probe) != SP_OK || sp_arrange(probe) != SP_OK ||
+                sp_slice(probe, path.c_str(), nullptr, nullptr) != SP_OK) {
+                failures += fail("gate15", std::string("setup: ") + sp_last_error(probe));
+            } else {
+                const size_t count = sp_toolpath_segment_count(probe);
+                const unsigned char *roles = sp_toolpath_roles(probe);
+                const unsigned *layers = sp_toolpath_layers(probe);
+                const float *widths = sp_toolpath_widths(probe);
+                const float *heights = sp_toolpath_heights(probe);
+                const size_t layer_count = sp_toolpath_layer_count(probe);
+
+                if (count == 0 || roles == nullptr || layers == nullptr ||
+                    widths == nullptr || heights == nullptr) {
+                    failures += fail("gate15", "a slice produced no per-segment description");
+                } else {
+                    // Layers must be non-decreasing and cover every index, which is
+                    // what lets a layer range be a contiguous slice of the buffer —
+                    // and is the check that catches an array misaligned against the
+                    // coordinates, since the ordering would no longer hold.
+                    unsigned previous = 0;
+                    unsigned highest = 0;
+                    for (size_t i = 0; i < count && failures == 0; ++i) {
+                        if (layers[i] < previous)
+                            failures += fail("gate15", "layer index falls from " +
+                                                           std::to_string(previous) + " to " +
+                                                           std::to_string(layers[i]) +
+                                                           " at segment " + std::to_string(i));
+                        previous = layers[i];
+                        highest = std::max(highest, layers[i]);
+                    }
+                    if (failures == 0 && size_t(highest) + 1 != layer_count)
+                        failures += fail("gate15", "layers run to " + std::to_string(highest) +
+                                                       " but the count says " +
+                                                       std::to_string(layer_count));
+
+                    // The same number the statistics report, from a different path
+                    // through the moves: they should not be able to disagree.
+                    const auto reported_layers =
+                        size_t(number_after(sp_slice_stats_json(probe), "\"layer_count\":"));
+                    if (failures == 0 && reported_layers != layer_count)
+                        failures += fail("gate15", "toolpath has " + std::to_string(layer_count) +
+                                                       " layers, statistics say " +
+                                                       std::to_string(reported_layers));
+
+                    // Roles are checked against the ";TYPE:" comments in the
+                    // G-code we just wrote, rather than against a list written
+                    // here: that is the same slice described by a different part
+                    // of the engine, so a mapping that quietly collapses or
+                    // renames a role disagrees with it.
+                    std::map<std::string, unsigned char> expected_for_type = {
+                        {"Outer wall", SP_ROLE_OUTER_WALL},
+                        {"Overhang wall", SP_ROLE_OUTER_WALL},
+                        {"Inner wall", SP_ROLE_INNER_WALL},
+                        {"Sparse infill", SP_ROLE_INFILL},
+                        {"Internal solid infill", SP_ROLE_SOLID_INFILL},
+                        {"Top surface", SP_ROLE_SOLID_INFILL},
+                        {"Bottom surface", SP_ROLE_SOLID_INFILL},
+                        {"Ironing", SP_ROLE_SOLID_INFILL},
+                        {"Bridge", SP_ROLE_BRIDGE},
+                        {"Internal Bridge", SP_ROLE_BRIDGE},
+                        {"Support", SP_ROLE_SUPPORT},
+                        {"Support interface", SP_ROLE_SUPPORT},
+                        {"Skirt", SP_ROLE_SKIRT_BRIM},
+                        {"Brim", SP_ROLE_SKIRT_BRIM},
+                    };
+
+                    std::set<unsigned char> allowed;
+                    std::set<std::string> unmapped_types;
+                    for (const std::string &line : lines_of(read_file(path))) {
+                        if (line.rfind(";TYPE:", 0) != 0)
+                            continue;
+                        const std::string type = trim(line.substr(6));
+                        const auto known = expected_for_type.find(type);
+                        if (known != expected_for_type.end())
+                            allowed.insert(known->second);
+                        else
+                            unmapped_types.insert(type);   // gap fill, custom, …
+                    }
+                    // Anything the table does not name is deliberately OTHER, so
+                    // its presence in the G-code licenses OTHER in the buffer.
+                    if (!unmapped_types.empty())
+                        allowed.insert(SP_ROLE_OTHER);
+
+                    std::map<unsigned char, size_t> role_counts;
+                    for (size_t i = 0; i < count; ++i)
+                        role_counts[roles[i]]++;
+
+                    for (const auto &[role, times] : role_counts) {
+                        if (failures == 0 && allowed.count(role) == 0)
+                            failures += fail("gate15", "role " + std::to_string(int(role)) +
+                                                           " appears " + std::to_string(times) +
+                                                           " times but nothing in the G-code is "
+                                                           "that kind of extrusion");
+                    }
+                    // The walls and both infills are what this model is made of; a
+                    // mapping that lost one of them would still satisfy the check
+                    // above, since a smaller set is a subset.
+                    for (unsigned char role : {SP_ROLE_OUTER_WALL, SP_ROLE_INNER_WALL,
+                                               SP_ROLE_INFILL, SP_ROLE_SOLID_INFILL}) {
+                        if (failures == 0 && role_counts.count(role) == 0)
+                            failures += fail("gate15", "no segments of role " +
+                                                           std::to_string(int(role)) +
+                                                           ", which this print is made of");
+                    }
+
+                    // Width and height are what let a view draw the object rather
+                    // than its centre lines, so zero or nonsense is worse than
+                    // useless — it would render as nothing at all.
+                    //
+                    // Bounded only for the extrusions the slicer planned. The
+                    // start G-code's prime line is erCustom, and its dimensions
+                    // are whatever the processor can infer from the E and XY it
+                    // was handed — 3.2mm wide here — which says nothing about
+                    // whether these fields are being filled in correctly.
+                    float widest = 0.0f, narrowest = 1e9f;
+                    std::map<int, size_t> height_counts;   // keyed by micrometres
+                    for (size_t i = 0; i < count && failures == 0; ++i) {
+                        if (!(widths[i] > 0.0f) || !(heights[i] > 0.0f)) {
+                            failures += fail("gate15", "segment " + std::to_string(i) +
+                                                           " has no extrusion size: " +
+                                                           std::to_string(widths[i]) + " by " +
+                                                           std::to_string(heights[i]));
+                            continue;
+                        }
+                        if (roles[i] == SP_ROLE_OTHER)
+                            continue;
+
+                        if (!(widths[i] > 0.1f && widths[i] < 1.5f))
+                            failures += fail("gate15", "segment " + std::to_string(i) +
+                                                           " has width " +
+                                                           std::to_string(widths[i]));
+                        else if (!(heights[i] > 0.02f && heights[i] < 1.0f))
+                            failures += fail("gate15", "segment " + std::to_string(i) +
+                                                           " has height " +
+                                                           std::to_string(heights[i]));
+                        widest = std::max(widest, widths[i]);
+                        narrowest = std::min(narrowest, widths[i]);
+                        height_counts[int(heights[i] * 1000.0f + 0.5f)]++;
+                    }
+
+                    // The commonest height should be the profile's layer height —
+                    // an independent oracle, since it comes from the configuration
+                    // rather than from the same buffer being checked.
+                    const auto config = parse_config(sp_resolved_config_text(probe), false);
+                    const auto layer_height_at = config.find("layer_height");
+                    if (failures == 0 && layer_height_at == config.end()) {
+                        failures += fail("gate15", "the profile has no layer_height to check against");
+                    } else if (failures == 0) {
+                        const double configured = std::strtod(layer_height_at->second.c_str(), nullptr);
+                        const auto commonest =
+                            std::max_element(height_counts.begin(), height_counts.end(),
+                                             [](const auto &a, const auto &b) {
+                                                 return a.second < b.second;
+                                             });
+                        const double typical = commonest->first / 1000.0;
+                        if (std::fabs(typical - configured) / configured > 0.15)
+                            failures += fail("gate15", "most segments are " +
+                                                           std::to_string(typical) +
+                                                           "mm tall, but the profile asks for " +
+                                                           std::to_string(configured));
+                    }
+
+                    // A constant would satisfy every bound above; the first layer
+                    // and the solid infill are deliberately not the same width as
+                    // the walls, so a single value means the field is not real.
+                    if (failures == 0 && widest - narrowest < 0.01f)
+                        failures += fail("gate15", "every segment is " + std::to_string(widest) +
+                                                       "mm wide, which no real slice is");
+
+                    if (failures == 0)
+                        reported("gate15"), std::printf(
+                            "gate15 segments: %zu across %zu layers, %zu roles, widths %.2f-%.2fmm\n",
+                            count, layer_count, role_counts.size(), narrowest, widest);
+                }
+            }
+            sp_engine_destroy(probe);
+        }
+    }
+
     sp_engine_destroy(engine);
 
-    constexpr int kExpectedGates = 14;
+    constexpr int kExpectedGates = 15;
     if (failures == 0 && gates_reported != kExpectedGates)
         failures += fail("suite", "only " + std::to_string(gates_reported) + " of " +
                                       std::to_string(kExpectedGates) +
