@@ -9,6 +9,8 @@ import UIKit
 struct PlateView: UIViewRepresentable {
     let geometry: PlateGeometry
     let display: AppModel.Display
+    /// Which layers the layer view shows; nil is all of them.
+    var visibleLayers: ClosedRange<UInt32>?
     /// Where the object was dragged to, in bed millimetres, once the finger lifts.
     var onMove: ((Double, Double) -> Void)?
     /// The object's rotation about the bed's up axis, in degrees, and where the
@@ -70,7 +72,8 @@ struct PlateView: UIViewRepresentable {
         guard let root = view.scene?.rootNode.childNode(withName: "root", recursively: false) else { return }
 
         // SwiftUI re-runs this for any state change at all, progress ticks included.
-        let state = Coordinator.State(revision: geometry.revision, display: display)
+        let state = Coordinator.State(revision: geometry.revision, display: display,
+                                      layers: visibleLayers)
         guard context.coordinator.state != state else { return }
         context.coordinator.state = state
 
@@ -100,7 +103,7 @@ struct PlateView: UIViewRepresentable {
                 }
             }
         case .layers:
-            if let node = toolpathNode(geometry.toolpath) {
+            if let node = ToolpathGeometry.node(geometry, layers: visibleLayers) {
                 root.addChildNode(node)
             } else if let node = solidNode(geometry.triangles) {
                 root.addChildNode(node)
@@ -127,6 +130,8 @@ struct PlateView: UIViewRepresentable {
         struct State: Equatable {
             let revision: Int
             let display: AppModel.Display
+    /// Which layers the layer view shows; nil is all of them.
+    var visibleLayers: ClosedRange<UInt32>?
         }
 
         var state: State?
@@ -517,17 +522,6 @@ struct PlateView: UIViewRepresentable {
         return SCNNode(geometry: geometry)
     }
 
-    private func toolpathNode(_ segments: [SIMD3<Float>]) -> SCNNode? {
-        guard !segments.isEmpty else { return nil }
-        let vertices = segments.map { SCNVector3($0.x, $0.y, $0.z) }
-        let element = SCNGeometryElement(indices: (0 ..< Int32(vertices.count)).map { $0 },
-                                         primitiveType: .line)
-        let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices)],
-                                   elements: [element])
-        geometry.firstMaterial?.diffuse.contents = UIColor.systemTeal
-        geometry.firstMaterial?.lightingModel = .constant
-        return SCNNode(geometry: geometry)
-    }
 
     private func frameCamera(_ coordinator: Coordinator, bed: [SIMD2<Float>],
                              bounds: (min: SIMD3<Float>, max: SIMD3<Float>)) {

@@ -159,6 +159,24 @@ final class Engine {
         }
     }
 
+    /// What each toolpath segment is, in the same order as the coordinates: the
+    /// kind of extrusion, the layer it belongs to, and the cross-section the
+    /// slicer planned for it.
+    func toolpathDescription() -> (roles: [UInt8], layers: [UInt32],
+                                   widths: [Float], heights: [Float], layerCount: Int) {
+        let count = sp_toolpath_segment_count(handle)
+        guard count > 0,
+              let roles = sp_toolpath_roles(handle), let layers = sp_toolpath_layers(handle),
+              let widths = sp_toolpath_widths(handle), let heights = sp_toolpath_heights(handle)
+        else { return ([], [], [], [], 0) }
+
+        return (Array(UnsafeBufferPointer(start: roles, count: count)),
+                (0 ..< count).map { UInt32(layers[$0]) },
+                Array(UnsafeBufferPointer(start: widths, count: count)),
+                Array(UnsafeBufferPointer(start: heights, count: count)),
+                Int(sp_toolpath_layer_count(handle)))
+    }
+
     func objectBounds(object: Int = 0) -> (min: SIMD3<Float>, max: SIMD3<Float>)? {
         var values = [Float](repeating: 0, count: 6)
         guard sp_object_bounds(handle, Int32(object), &values) == SP_OK else { return nil }

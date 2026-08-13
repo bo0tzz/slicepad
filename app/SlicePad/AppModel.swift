@@ -30,6 +30,17 @@ final class AppModel: ObservableObject {
     }
     @Published var geometry = PlateGeometry()
 
+    /// The topmost layer the layer view draws. Everything below it is shown, which
+    /// is what makes scrubbing look like watching the print go down rather than
+    /// like inspecting one slice in isolation.
+    @Published var topLayer: UInt32 = 0
+
+    var layerCount: Int { geometry.layerCount }
+    var visibleLayers: ClosedRange<UInt32>? {
+        guard display == .layers, geometry.layerCount > 0 else { return nil }
+        return 0 ... topLayer
+    }
+
     @Published var isSlicing = false
     @Published var progress: Double = 0
     @Published var stage = ""
@@ -248,6 +259,11 @@ final class AppModel: ObservableObject {
         fresh.revision = geometry.revision + 1
         fresh.modelGeneration = modelGeneration
         geometry = fresh
+        // A fresh slice shows the whole print; the control starts at the top and is
+        // pulled down, rather than starting at nothing.
+        if fresh.layerCount > 0 {
+            topLayer = UInt32(fresh.layerCount - 1)
+        }
     }
 
 }

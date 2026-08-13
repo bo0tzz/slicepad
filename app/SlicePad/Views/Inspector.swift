@@ -98,6 +98,17 @@ struct Inspector: View {
                     }
                 }
 
+                // Only in the layer view, where it does something.
+                if model.display == .layers && model.layerCount > 1 {
+                    Section("Layers") {
+                        LabeledContent("Showing",
+                                       value: "1–\(model.topLayer + 1) of \(model.layerCount)")
+                        Slider(value: Binding(get: { Double(model.topLayer) },
+                                              set: { model.topLayer = UInt32($0.rounded()) }),
+                               in: 0 ... Double(max(model.layerCount - 1, 1)), step: 1)
+                    }
+                }
+
                 if let stats = model.stats {
                     Section("Result") {
                         LabeledContent("Time", value: stats.formattedTime)

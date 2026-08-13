@@ -6,6 +6,13 @@ struct PlateGeometry {
     var bed: [SIMD2<Float>] = []
     var triangles: [SIMD3<Float>] = []
     var toolpath: [SIMD3<Float>] = []
+    /// Per segment, in the same order as `toolpath`'s pairs: what kind of extrusion
+    /// it is, which layer it belongs to, and how wide and tall the slicer laid it.
+    var roles: [UInt8] = []
+    var layers: [UInt32] = []
+    var widths: [Float] = []
+    var heights: [Float] = []
+    var layerCount = 0
     var bounds: (min: SIMD3<Float>, max: SIMD3<Float>)?
 
     /// Where the object sits on the bed, so a drag can start from it rather than
@@ -183,6 +190,14 @@ final class EngineHost: @unchecked Sendable {
                 toolpath: includeToolpath ? engine.toolpathSegments() : [],
                 bounds: engine.objectCount > 0 ? engine.objectBounds() : nil
             )
+            if includeToolpath {
+                let described = engine.toolpathDescription()
+                geometry.roles = described.roles
+                geometry.layers = described.layers
+                geometry.widths = described.widths
+                geometry.heights = described.heights
+                geometry.layerCount = described.layerCount
+            }
             if let placement = engine.transform() {
                 geometry.offset = SIMD2(Float(placement[4]), Float(placement[5]))
             }
