@@ -103,7 +103,15 @@ enum ToolpathGeometry {
         geometry.materials = roles.map { role in
             let material = SCNMaterial()
             material.diffuse.contents = colour(for: role)
-            material.lightingModel = .lambert
+            // Blinn rather than lambert for the sake of one thing: a soft highlight
+            // running along the top of each bead. Diffuse shading alone gives two
+            // beads lying side by side the same four brightnesses, so a field of
+            // them reads as one surface; the highlight is what separates them into
+            // individual strands. Broad and dim on purpose — a tight bright one
+            // makes a print look wet.
+            material.lightingModel = .blinn
+            material.specular.contents = UIColor(white: 0.35, alpha: 1)
+            material.shininess = 0.25
             material.isDoubleSided = true
             return material
         }
