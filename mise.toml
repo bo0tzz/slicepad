@@ -24,6 +24,10 @@ run = "./scripts/fetch-orca.sh"
 sources = ["scripts/fetch-orca.sh", "patches/*.patch"]
 outputs = ["third_party/orcaslicer/.slicepad-stamp"]
 
+[tasks.check-abi]
+description = "Verify every function the ABI header declares is defined"
+run = "./scripts/check-abi.sh"
+
 [tasks.check-patches]
 description = "Verify patches/ reproduces the engine checkout"
 run = "./scripts/check-patches.sh"

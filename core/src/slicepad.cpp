@@ -564,6 +564,34 @@ sp_result sp_object_get_transform(sp_engine *engine, int object_index,
     });
 }
 
+sp_result sp_arrange(sp_engine *engine)
+{
+    return guard(engine, [&]() -> sp_result {
+        if (!engine->model_loaded) {
+            engine->last_error = "no model loaded";
+            return SP_ERR_STATE;
+        }
+        if (!engine->config_loaded) {
+            engine->last_error = "no profile loaded, so the bed is unknown";
+            return SP_ERR_STATE;
+        }
+        // libslic3r's own arrange, invoked the way the CLI does, rather than
+        // shifting instances by hand.
+        const Points bed = get_bed_shape(engine->config);
+        arrangement::ArrangeParams params;
+        // Its default progress callback writes to stdout, which would corrupt a
+        // consumer's output. A no-op rather than nullptr: the caller invokes it
+        // unconditionally.
+        params.progressind = [](unsigned, std::string) {};
+        arrange_objects(engine->model, bed, params);
+        for (ModelObject *object : engine->model.objects)
+            if (!object->instances.empty())
+                object->ensure_on_bed();
+        engine->mesh = extract_mesh(engine->model);
+        return SP_OK;
+    });
+}
+
 sp_result sp_place_nearest_face_down(sp_engine *engine, int object_index)
 {
     return guard(engine, [&]() -> sp_result {

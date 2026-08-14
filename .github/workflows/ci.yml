@@ -32,6 +32,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # In the quickest job, so a declaration with no definition costs a minute
+      # rather than the twenty it takes each consumer to reach its own link step.
+      - name: Check the ABI header against its implementation
+        run: ./scripts/check-abi.sh
+
       - name: Assemble the C module the app imports
         run: |
           mkdir -p build/module
