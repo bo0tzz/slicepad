@@ -28,18 +28,34 @@ struct PlateView: UIViewRepresentable {
         // facing every direction, and the ones facing away from a single light
         // render pure black. The solid model got away with it because its faces are
         // few and large.
+        //
+        // Kept dim, though. Ambient reaches into the gap between two beads exactly
+        // as strongly as it reaches the outside of the part, so a bright one erases
+        // every crevice a sliced print is made of and leaves a flat mass of colour.
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 600
+        ambient.light?.intensity = 220
         view.scene?.rootNode.addChildNode(ambient)
 
-        // Carried by the camera, so turning the plate does not swing a part into
-        // shadow.
+        // Both directional lights are carried by the camera, so turning the plate
+        // does not swing a part into shadow — but aimed off the view axis rather
+        // than straight down the lens, which lights everything facing you equally
+        // and so shades a round bead like a flat ribbon.
         let key = SCNNode()
         key.light = SCNLight()
         key.light?.type = .directional
-        key.light?.intensity = 700
+        key.light?.intensity = 950
+        key.eulerAngles = SCNVector3(-0.5, 0.55, 0)
+
+        // Opposite and much dimmer, so the faces the key light misses are still
+        // shaped by a direction instead of being left to ambient.
+        let fill = SCNNode()
+        fill.light = SCNLight()
+        fill.light?.type = .directional
+        fill.light?.intensity = 320
+        fill.eulerAngles = SCNVector3(0.35, -0.9, 0)
+
         // Darker than the plate, so the bed reads as a surface sitting in space
         // rather than as an outline drawn on the background.
         view.backgroundColor = .systemGray5
@@ -55,7 +71,22 @@ struct PlateView: UIViewRepresentable {
         // pinch are competing recognisers, so a one-handed pinch while panning is
         // dropped, and its inertia throws the view across the plate on release.
         view.allowsCameraControl = false
+        // An extrusion is a fraction of a millimetre across, so at any zoom that
+        // shows a whole layer the beads are a pixel or two wide and stair-step
+        // into each other without this.
+        view.antialiasingMode = .multisampling4X
         context.coordinator.cameraNode.addChildNode(key)
+        context.coordinator.cameraNode.addChildNode(fill)
+        // Lighting alone cannot say which of two beads is the one further in: both
+        // face the same way and take the same light. Occlusion is the part of the
+        // picture that reads as depth, and the radius is in bed millimetres — a
+        // couple of extrusion widths, so it darkens the seams between beads rather
+        // than shading a whole region flat.
+        if let camera = context.coordinator.cameraNode.camera {
+            camera.screenSpaceAmbientOcclusionIntensity = 1.6
+            camera.screenSpaceAmbientOcclusionRadius = 1.5
+            camera.screenSpaceAmbientOcclusionBias = 0.02
+        }
         view.scene?.rootNode.addChildNode(context.coordinator.cameraNode)
         view.pointOfView = context.coordinator.cameraNode
         context.coordinator.view = view
@@ -227,16 +258,12 @@ struct PlateView: UIViewRepresentable {
         private let orbitSpeed: Float = 0.006
 
         func apply() {
-            // Never quite flat and never over the top: past either, a turntable
-            // stops describing what the fingers are doing.
-            pitch = min(max(pitch, 0.05), 1.5)
+            // Free from directly overhead to directly underneath, stopping just
+            // short of either pole: at one the horizontal offset vanishes, yaw
+            // stops meaning anything, and dragging through it flips the view over.
+            let overhead = Float.pi / 2 - 0.02
+            pitch = min(max(pitch, -overhead), overhead)
             distance = min(max(distance, 10), 3000)
-            // Clamping the pitch is not enough to stay above the plate, because
-            // panning moves what the camera looks at: raise the target far enough
-            // and the camera passes under the bed, where every surface faces away
-            // from the light and the scene goes black. There is no view of a print
-            // from underneath the bed worth having.
-            target.y = max(target.y, 0)
 
             let horizontal = distance * cos(pitch)
             cameraNode.simdPosition = target + SIMD3<Float>(horizontal * sin(yaw),
@@ -519,7 +546,11 @@ struct PlateView: UIViewRepresentable {
            let lowY = ys.min(), let highY = ys.max() {
             let surface = SCNPlane(width: CGFloat(highX - lowX), height: CGFloat(highY - lowY))
             surface.firstMaterial?.diffuse.contents = UIColor.systemBackground
-            surface.firstMaterial?.isDoubleSided = true
+            // Only from above. Now that the camera can go under the plate, a
+            // double-sided bed is an opaque sheet across the whole view from down
+            // there; culled, the outline still says where the bed is while the
+            // first layer stays visible through it.
+            surface.firstMaterial?.isDoubleSided = false
             surface.firstMaterial?.lightingModel = .constant
             let surfaceNode = SCNNode(geometry: surface)
             // Just below the bed plane, so it does not fight with a model sitting
