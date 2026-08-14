@@ -88,27 +88,53 @@ int sp_model_repaired_errors(const sp_engine *engine);
 sp_result sp_load_model(sp_engine *engine, const char *path);
 int sp_object_count(const sp_engine *engine);
 
-/* Uniform scale, rotation about each axis in degrees, and translation in bed
- * millimetres. Rotation is absolute rather than incremental, so a control can
- * bind straight to it. X and Y rotation is what stands a part up: without it the
- * only way to reorient a CAD export is sp_auto_orient.
+/* An object's placement, in the form the engine itself keeps it: libslic3r's
+ * ModelInstance holds an offset, a rotation, a scaling factor and a mirror, each a
+ * Vec3d, and this is those four. Complete against the engine rather than against
+ * whichever controls an app happens to show, so adding a control does not mean
+ * changing the ABI.
  *
- * The object is dropped back onto the bed afterwards, since rotating about X or
- * Y moves it through the print surface. Anything richer than this belongs in
- * desktop Orca. */
-sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
-                           double rotate_x_deg, double rotate_y_deg,
-                           double rotate_z_deg,
-                           double translate_x, double translate_y);
-/* The object's current placement, as six doubles: scale, rotation about each axis
- * in degrees, then translation x and y — exactly the arguments sp_set_transform
- * takes, so the two round-trip.
+ * Translation is in bed millimetres. Rotations are in degrees and compose as
+ * Rz*Ry*Rx, matching the engine's Geometry::rotation_transform — a caller turning a
+ * part about a world axis has to compose the turn and re-derive all three angles,
+ * not add to one, or it will rotate underneath the angles already there. Scale is a
+ * factor per axis and must be positive. Mirror is +1 or -1 per axis.
  *
- * Needed because sp_set_transform is absolute in every argument. A caller that
- * exposes only some of them, as a simple UI will, has to pass the rest back
- * unchanged; without this it would send zeros, which teleports the object to the
- * bed origin and undoes any auto-orientation. */
-sp_result sp_object_transform(sp_engine *engine, int object_index, double *out_values);
+ * Written in that order, too: the engine keeps a single matrix and derives these
+ * four from it, and setting a scaling factor there discards any reflection, so the
+ * mirror is applied last.
+ *
+ * Which axis carries a reflection is not preserved when there is also a rotation.
+ * The engine takes the mirror from the signs of a polar decomposition, and that
+ * decomposition is free to put the reflection on a different axis and adjust the
+ * rotation to match — the same placement, described differently. What survives is
+ * handedness: mirror an odd number of axes and the product of the three stays
+ * negative. Translation, rotation and scale round-trip exactly.
+ *
+ * The rotation is about the instance origin, which is not generally the middle of
+ * the part. A caller that turns a part about some other pivot keeps that pivot
+ * still by adjusting the translation itself: it has every value it needs to, which
+ * is why there is no pivot argument here. */
+typedef struct {
+    double translate[3];
+    double rotate_deg[3];
+    double scale[3];
+    double mirror[3];
+} sp_transform;
+
+/* Absolute in every field: what is passed is what the object ends up with, so a
+ * caller changing one thing reads first and writes the rest back unchanged. A
+ * simple UI that sent zeros for the fields it does not show would teleport the
+ * object to the bed origin and undo any auto-orientation.
+ *
+ * translate[2] is taken and then corrected so the object rests on the bed, since
+ * rotating about X or Y moves it through the print surface. The same thing the
+ * desktop does after any transform, and the reason a read after a write can differ
+ * from what was written in that one component. */
+sp_result sp_object_set_transform(sp_engine *engine, int object_index,
+                                  const sp_transform *transform);
+sp_result sp_object_get_transform(sp_engine *engine, int object_index,
+                                  sp_transform *out_transform);
 
 /* Place objects on the bed using libslic3r's own arrange — the same code the
  * desktop's arrange button drives. Needs a profile loaded, since the bed comes
@@ -133,7 +159,7 @@ sp_result sp_place_nearest_face_down(sp_engine *engine, int object_index);
 
 /* Rotate objects into a printable orientation using the desktop's auto-orient
  * algorithm, then drop them back onto the bed. CAD exports are usually oriented
- * for modelling rather than printing, and sp_set_transform only rotates about Z,
+ * for modelling rather than printing, and sp_object_set_transform is absolute,
  * so this is the only way to stand a part up. */
 sp_result sp_auto_orient(sp_engine *engine);
 
@@ -168,7 +194,8 @@ const char *sp_slice_stats_json(const sp_engine *engine);
  * as x,y pairs. Both are owned by the engine.
  *
  * The mesh is rebuilt, and any pointer to it invalidated, by anything that moves
- * geometry: sp_load_model, sp_set_transform, sp_arrange and sp_auto_orient. The
+ * geometry: sp_load_model, sp_object_set_transform, sp_arrange and
+ * sp_auto_orient. The
  * bed lasts until the next sp_load_config. Copy out what you need rather than
  * holding these across calls.
  *

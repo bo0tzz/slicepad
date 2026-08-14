@@ -160,45 +160,44 @@ final class EngineHost: @unchecked Sendable {
 
     /// What the Z control should read after the engine has placed the object itself.
     func rotationZ() async -> Double {
-        await perform { $0.transform()?[3] ?? 0 }
+        await perform { $0.placement()?.rotateDegrees.z ?? 0 }
     }
 
     func arrange() async throws {
         try await perform { try $0.arrange() }
     }
 
-    /// Moves the object on the bed, keeping everything else where it is. Every
-    /// argument of sp_set_transform is absolute, so anything not being changed has
-    /// to be read back and passed through.
-    func setPosition(x: Double, y: Double) async throws {
+    /// Reads the placement, changes part of it, writes it back. Every field of a
+    /// placement is absolute, so this is the only correct shape for a control that
+    /// owns one of them — and doing it inside the one queued call keeps it atomic,
+    /// rather than reading on one hop and writing on another with a slice in between.
+    private func adjust(_ change: @escaping @Sendable (inout Engine.Placement) -> Void) async throws {
         try await perform { engine in
-            let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
-            try engine.setTransform(scale: current[0], rotateX: current[1],
-                                    rotateY: current[2], rotateZ: current[3],
-                                    translateX: x, translateY: y)
+            var placement = engine.placement() ?? Engine.Placement()
+            change(&placement)
+            try engine.setPlacement(placement)
         }
+    }
+
+    /// Moves the object on the bed, keeping everything else where it is.
+    func setPosition(x: Double, y: Double) async throws {
+        try await adjust { $0.translate.x = x; $0.translate.y = y }
     }
 
     /// Turns the object about all three axes, keeping its size and position. The
-    /// gizmo changes one axis at a time but has to send all three, because every
-    /// argument of sp_set_transform is absolute.
+    /// gizmo changes one axis at a time but sends all three, because the engine
+    /// composes them Rz·Ry·Rx — so a single component means something different
+    /// depending on the other two.
     func setRotation(x: Double, y: Double, z: Double) async throws {
-        try await perform { engine in
-            let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
-            try engine.setTransform(scale: current[0], rotateX: x, rotateY: y,
-                                    rotateZ: z, translateX: current[4],
-                                    translateY: current[5])
-        }
+        try await adjust { $0.rotateDegrees = SIMD3(x, y, z) }
     }
 
     /// Applies the two controls the app exposes, keeping the X and Y rotation
-    /// auto-orient chose and the position the object sits at — same reason.
+    /// auto-orient chose and the position the object sits at.
     func setScaleAndRotation(scale: Double, rotateZ: Double) async throws {
-        try await perform { engine in
-            let current = engine.transform() ?? [1, 0, 0, 0, 0, 0]
-            try engine.setTransform(scale: scale, rotateX: current[1], rotateY: current[2],
-                                    rotateZ: rotateZ, translateX: current[4],
-                                    translateY: current[5])
+        try await adjust {
+            $0.scale = SIMD3(repeating: scale)
+            $0.rotateDegrees.z = rotateZ
         }
     }
 
@@ -229,10 +228,12 @@ final class EngineHost: @unchecked Sendable {
                 geometry.heights = described.heights
                 geometry.layerCount = described.layerCount
             }
-            if let placement = engine.transform() {
-                geometry.offset = SIMD2(Float(placement[4]), Float(placement[5]))
-                geometry.rotation = SIMD3(Float(placement[1]), Float(placement[2]),
-                                          Float(placement[3]))
+            if let placement = engine.placement() {
+                geometry.offset = SIMD2(Float(placement.translate.x),
+                                        Float(placement.translate.y))
+                geometry.rotation = SIMD3(Float(placement.rotateDegrees.x),
+                                          Float(placement.rotateDegrees.y),
+                                          Float(placement.rotateDegrees.z))
             }
             return geometry
         }

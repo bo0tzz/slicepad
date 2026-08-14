@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <cctype>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -174,6 +175,47 @@ int fail(const char *gate, const std::string &detail)
 {
     std::fprintf(stderr, "FAIL %s: %s\n", gate, detail.c_str());
     return 1;
+}
+
+// A whole placement in one expression, for the gates that only care about a
+// rotation or a scale. Uniform scale and no mirroring, which is what the app sends.
+sp_transform placement(double scale, std::array<double, 3> rotate_deg,
+                       std::array<double, 3> translate)
+{
+    sp_transform transform = {};
+    for (int axis = 0; axis < 3; ++axis) {
+        transform.translate[axis] = translate[size_t(axis)];
+        transform.rotate_deg[axis] = rotate_deg[size_t(axis)];
+        transform.scale[axis] = scale;
+        transform.mirror[axis] = 1;
+    }
+    return transform;
+}
+
+// Every field but one. Z translation is excepted because the engine corrects it so
+// the object rests on the bed, which the header promises and gate 9 checks.
+int compare_placement(const char *gate, const std::string &context,
+                      const sp_transform &got, const sp_transform &want)
+{
+    static const char *const axes = "xyz";
+    struct Field { const char *name; const double *got; const double *want; };
+    const Field fields[] = {
+        {"translate", got.translate, want.translate},
+        {"rotate_deg", got.rotate_deg, want.rotate_deg},
+        {"scale", got.scale, want.scale},
+        {"mirror", got.mirror, want.mirror},
+    };
+    for (const Field &field : fields) {
+        for (int axis = 0; axis < 3; ++axis) {
+            if (std::string(field.name) == "translate" && axis == 2)
+                continue;
+            if (std::fabs(field.got[axis] - field.want[axis]) > 1e-6)
+                return fail(gate, context + " left " + field.name + "." + axes[axis] +
+                                      " at " + std::to_string(field.got[axis]) +
+                                      ", expected " + std::to_string(field.want[axis]));
+        }
+    }
+    return 0;
 }
 
 
@@ -537,12 +579,13 @@ int main(int argc, char **argv)
     if (failures == 0) {
         const std::string raw = fixtures + "/model-shapr3d.3mf";
         float before[6] = {0}, rotated[6] = {0}, scaled[6] = {0};
+        const sp_transform turn = placement(1.0, {90.0, 0.0, 0.0}, {100.0, 100.0, 0.0});
         auto extent = [](const float *b, int axis) { return b[axis + 3] - b[axis]; };
 
         if (sp_load_model(engine, raw.c_str()) != SP_OK ||
             sp_object_bounds(engine, 0, before) != SP_OK) {
             failures += fail("gate9", std::string("reloading the raw export: ") + sp_last_error(engine));
-        } else if (sp_set_transform(engine, 0, 1.0, 90.0, 0.0, 0.0, 100.0, 100.0) != SP_OK ||
+        } else if (sp_object_set_transform(engine, 0, &turn) != SP_OK ||
                    sp_object_bounds(engine, 0, rotated) != SP_OK) {
             failures += fail("gate9", std::string("rotating about X: ") + sp_last_error(engine));
         } else {
@@ -558,7 +601,8 @@ int main(int argc, char **argv)
             if (rotated[2] < -0.05)
                 failures += fail("gate9", "rotation left the object below the bed");
 
-            if (sp_set_transform(engine, 0, 2.0, 0.0, 0.0, 0.0, 100.0, 100.0) != SP_OK ||
+            const sp_transform bigger = placement(2.0, {0.0, 0.0, 0.0}, {100.0, 100.0, 0.0});
+            if (sp_object_set_transform(engine, 0, &bigger) != SP_OK ||
                 sp_object_bounds(engine, 0, scaled) != SP_OK) {
                 failures += fail("gate9", std::string("scaling: ") + sp_last_error(engine));
             } else if (std::fabs(extent(scaled, 0) - 2 * extent(before, 0)) > 0.05) {
@@ -720,10 +764,10 @@ int main(int argc, char **argv)
         }
     }
 
-    // Gate 12: placement round-trips. sp_set_transform is absolute in every
-    // argument, so a caller exposing only some of them has to read the rest back
-    // and pass them through unchanged. If it cannot, the app sends zeros — which
-    // drops the object on the bed origin and undoes auto-orient, both silently.
+    // Gate 12: placement round-trips. Every field of sp_transform is absolute, so a
+    // caller exposing only some of them has to read the rest back and pass them
+    // through unchanged. If it cannot, the app sends defaults — which drops the
+    // object on the bed origin and undoes auto-orient, both silently.
     if (failures == 0) {
         sp_engine *probe = sp_engine_create(fixtures.c_str(), work.c_str());
         if (probe == nullptr) {
@@ -731,48 +775,84 @@ int main(int argc, char **argv)
         } else {
             const std::string profile = fixtures + "/model.3mf";
             const std::string mesh = fixtures + "/model-shapr3d.3mf";
+            // Every field set to something distinguishable, including the two the
+            // app has no control for: a placement the ABI cannot carry round-trips
+            // as silent data loss rather than as an error.
+            sp_transform placed = {};
+            placed.translate[0] = 100; placed.translate[1] = 120; placed.translate[2] = 0;
+            placed.rotate_deg[0] = 30; placed.rotate_deg[1] = 0; placed.rotate_deg[2] = 45;
+            placed.scale[0] = 1.5; placed.scale[1] = 1.25; placed.scale[2] = 0.75;
+            placed.mirror[0] = 1; placed.mirror[1] = 1; placed.mirror[2] = 1;
+
             if (sp_load_config(probe, profile.c_str()) != SP_OK ||
                 sp_load_model(probe, mesh.c_str()) != SP_OK) {
                 failures += fail("gate12", std::string("setup: ") + sp_last_error(probe));
-            } else if (sp_set_transform(probe, 0, 1.5, 30, 0, 45, 100, 120) != SP_OK) {
+            } else if (sp_object_set_transform(probe, 0, &placed) != SP_OK) {
                 failures += fail("gate12", std::string("placing: ") + sp_last_error(probe));
             } else {
-                const double placed[6] = {1.5, 30, 0, 45, 100, 120};
-                double read_back[6] = {0};
-                if (sp_object_transform(probe, 0, read_back) != SP_OK) {
+                sp_transform read_back = {};
+                if (sp_object_get_transform(probe, 0, &read_back) != SP_OK) {
                     failures += fail("gate12", std::string("reading back: ") + sp_last_error(probe));
                 } else {
-                    for (int i = 0; i < 6 && failures == 0; ++i)
-                        if (std::fabs(read_back[i] - placed[i]) > 1e-6)
-                            failures += fail("gate12", "component " + std::to_string(i) +
-                                                           " read back as " +
-                                                           std::to_string(read_back[i]) +
-                                                           " after being set to " +
-                                                           std::to_string(placed[i]));
+                    // Z translation excepted: it is corrected so the object rests on
+                    // the bed, which the header says and gate 9 relies on.
+                    failures += compare_placement("gate12", "after being set", read_back, placed);
                 }
 
                 // The flow the app actually performs: change one control, pass the
                 // rest back as read. Everything not being changed has to survive —
-                // without the getter the app sends zeros here, which drops the
+                // without the getter the app sends defaults here, which drops the
                 // object on the bed origin and undoes any auto-orientation.
                 if (failures == 0) {
-                    double next[6] = {0};
-                    sp_object_transform(probe, 0, next);
-                    next[0] = 2.0;   // as though a scale control moved
-                    if (sp_set_transform(probe, 0, next[0], next[1], next[2], next[3],
-                                         next[4], next[5]) != SP_OK) {
+                    sp_transform next = {};
+                    sp_object_get_transform(probe, 0, &next);
+                    next.scale[0] = 2.0;   // as though a scale control moved
+                    if (sp_object_set_transform(probe, 0, &next) != SP_OK) {
                         failures += fail("gate12", std::string("re-applying: ") + sp_last_error(probe));
                     } else {
-                        double after[6] = {0};
-                        sp_object_transform(probe, 0, after);
-                        const double want[6] = {2.0, 30, 0, 45, 100, 120};
-                        for (int i = 0; i < 6 && failures == 0; ++i)
-                            if (std::fabs(after[i] - want[i]) > 1e-6)
-                                failures += fail("gate12",
-                                                 "changing the scale moved component " +
-                                                     std::to_string(i) + " to " +
-                                                     std::to_string(after[i]) + ", expected " +
-                                                     std::to_string(want[i]));
+                        sp_transform after = {};
+                        sp_object_get_transform(probe, 0, &after);
+                        sp_transform want = placed;
+                        want.scale[0] = 2.0;
+                        failures += compare_placement("gate12", "changing the scale", after, want);
+                    }
+                }
+
+                // Mirroring, on the only terms the engine can promise. It keeps one
+                // matrix and reads the mirror back from the signs of a polar
+                // decomposition, which is free to move the reflection to another axis
+                // and adjust the rotation to suit — so asserting "the Y I mirrored is
+                // the Y that comes back" would be asserting a fact about Eigen's SVD.
+                // Handedness is the part that means something: an odd number of
+                // reflections keeps the product of the three negative.
+                if (failures == 0) {
+                    sp_transform mirrored = {};
+                    sp_object_get_transform(probe, 0, &mirrored);
+                    mirrored.mirror[1] = -1;
+                    if (sp_object_set_transform(probe, 0, &mirrored) != SP_OK) {
+                        failures += fail("gate12", std::string("mirroring: ") + sp_last_error(probe));
+                    } else {
+                        sp_transform read_back = {};
+                        sp_object_get_transform(probe, 0, &read_back);
+                        const double handedness = read_back.mirror[0] * read_back.mirror[1] *
+                                                  read_back.mirror[2];
+                        if (handedness >= 0)
+                            failures += fail("gate12", "mirroring one axis left the placement "
+                                                       "right-handed, so it did not take");
+
+                        // And back, since a mirror a caller cannot undo is worse than
+                        // one it never had.
+                        sp_transform restored = read_back;
+                        restored.mirror[0] = 1; restored.mirror[1] = 1; restored.mirror[2] = 1;
+                        if (sp_object_set_transform(probe, 0, &restored) != SP_OK) {
+                            failures += fail("gate12", std::string("unmirroring: ") + sp_last_error(probe));
+                        } else {
+                            sp_transform plain = {};
+                            sp_object_get_transform(probe, 0, &plain);
+                            if (plain.mirror[0] * plain.mirror[1] * plain.mirror[2] <= 0)
+                                failures += fail("gate12", "clearing the mirror left the "
+                                                           "placement left-handed");
+                        }
                     }
                 }
 
@@ -938,8 +1018,8 @@ int main(int argc, char **argv)
             // face — arrange only moves things in X and Y.
             if (sp_place_nearest_face_down(probe, 0) != SP_OK)
                 failures += fail("gate15", std::string("initial snap: ") + sp_last_error(probe));
-            double flat[6] = {0};
-            sp_object_transform(probe, 0, flat);
+            sp_transform flat = {};
+            sp_object_get_transform(probe, 0, &flat);
             float flat_size[3] = {0};
             extent(probe, flat_size);
 
@@ -951,8 +1031,10 @@ int main(int argc, char **argv)
             // close to down and which one wins comes down to floating point — the
             // gate then passes on x86-64 and fails on arm64, describing the
             // architecture rather than the code.
-            if (sp_set_transform(probe, 0, flat[0], flat[1] + 3, flat[2] - 2, flat[3],
-                                 flat[4], flat[5]) != SP_OK) {
+            sp_transform tipped = flat;
+            tipped.rotate_deg[0] += 3;
+            tipped.rotate_deg[1] -= 2;
+            if (sp_object_set_transform(probe, 0, &tipped) != SP_OK) {
                 failures += fail("gate15", std::string("tipping: ") + sp_last_error(probe));
             } else {
                 float tipped_size[3] = {0};

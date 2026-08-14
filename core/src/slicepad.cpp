@@ -450,7 +450,7 @@ sp_result sp_load_model(sp_engine *engine, const char *path)
         // Until that is understood, an unplaced import is refused by the build
         // volume check below rather than silently mis-sliced. Real placement
         // belongs with libslic3r's own arrange and an orientation control anyway:
-        // a CAD export is rarely in a printable orientation, and sp_set_transform
+        // a CAD export is rarely in a printable orientation, and a transform
         // only rotates about Z.
 
         engine->repaired_errors = 0;
@@ -468,32 +468,64 @@ int sp_object_count(const sp_engine *engine)
     return engine ? int(engine->model.objects.size()) : 0;
 }
 
-sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
-                           double rotate_x_deg, double rotate_y_deg, double rotate_z_deg,
-                           double translate_x, double translate_y)
+namespace {
+
+/* Every entry point that touches a placement needs the same object, and the same
+ * three ways of not having one. */
+ModelInstance *instance_for(sp_engine *engine, int object_index)
+{
+    if (!engine->model_loaded || object_index < 0 ||
+        size_t(object_index) >= engine->model.objects.size()) {
+        engine->last_error = "no such object";
+        return nullptr;
+    }
+    ModelObject *object = engine->model.objects[size_t(object_index)];
+    if (object->instances.empty()) {
+        engine->last_error = "object has no instances";
+        return nullptr;
+    }
+    return object->instances.front();
+}
+
+} // namespace
+
+sp_result sp_object_set_transform(sp_engine *engine, int object_index,
+                                  const sp_transform *transform)
 {
     return guard(engine, [&]() -> sp_result {
-        if (!engine->model_loaded || object_index < 0 ||
-            size_t(object_index) >= engine->model.objects.size()) {
-            engine->last_error = "no such object";
+        if (transform == nullptr) {
+            engine->last_error = "no transform";
             return SP_ERR_STATE;
         }
-        if (scale <= 0.0) {
-            engine->last_error = "scale must be positive";
+        ModelInstance *instance = instance_for(engine, object_index);
+        if (instance == nullptr) {
             return SP_ERR_STATE;
         }
-        ModelObject *object = engine->model.objects[size_t(object_index)];
-        if (object->instances.empty()) {
-            engine->last_error = "object has no instances";
-            return SP_ERR_STATE;
+        for (int axis = 0; axis < 3; ++axis) {
+            if (!(transform->scale[axis] > 0.0)) {
+                engine->last_error = "scale must be positive on every axis";
+                return SP_ERR_STATE;
+            }
+            /* Anything but a reflection is a scale wearing a minus sign, and it
+             * would silently turn the mesh inside out. */
+            if (transform->mirror[axis] != 1.0 && transform->mirror[axis] != -1.0) {
+                engine->last_error = "mirror must be 1 or -1 on every axis";
+                return SP_ERR_STATE;
+            }
         }
 
         const double to_radians = M_PI / 180.0;
-        ModelInstance *instance = object->instances.front();
-        instance->set_scaling_factor(Vec3d(scale, scale, scale));
-        instance->set_rotation(Vec3d(rotate_x_deg * to_radians, rotate_y_deg * to_radians,
-                                     rotate_z_deg * to_radians));
-        instance->set_offset(Vec3d(translate_x, translate_y, instance->get_offset().z()));
+        instance->set_scaling_factor(Vec3d(transform->scale[0], transform->scale[1],
+                                           transform->scale[2]));
+        instance->set_rotation(Vec3d(transform->rotate_deg[0] * to_radians,
+                                     transform->rotate_deg[1] * to_radians,
+                                     transform->rotate_deg[2] * to_radians));
+        instance->set_mirror(Vec3d(transform->mirror[0], transform->mirror[1],
+                                   transform->mirror[2]));
+        instance->set_offset(Vec3d(transform->translate[0], transform->translate[1],
+                                   transform->translate[2]));
+
+        ModelObject *object = engine->model.objects[size_t(object_index)];
         object->invalidate_bounding_box();
 
         // Rotating about X or Y moves the object through the bed, so put it back
@@ -504,62 +536,30 @@ sp_result sp_set_transform(sp_engine *engine, int object_index, double scale,
     });
 }
 
-sp_result sp_object_transform(sp_engine *engine, int object_index, double *out_values)
+sp_result sp_object_get_transform(sp_engine *engine, int object_index,
+                                  sp_transform *out_transform)
 {
     return guard(engine, [&]() -> sp_result {
-        if (!engine->model_loaded || object_index < 0 ||
-            size_t(object_index) >= engine->model.objects.size()) {
-            engine->last_error = "no such object";
-            return SP_ERR_STATE;
-        }
-        if (out_values == nullptr) {
+        if (out_transform == nullptr) {
             engine->last_error = "no output buffer";
             return SP_ERR_STATE;
         }
-        const ModelObject *object = engine->model.objects[size_t(object_index)];
-        if (object->instances.empty()) {
-            engine->last_error = "object has no instances";
+        const ModelInstance *instance = instance_for(engine, object_index);
+        if (instance == nullptr) {
             return SP_ERR_STATE;
         }
 
         const double to_degrees = 180.0 / M_PI;
-        const ModelInstance *instance = object->instances.front();
+        const Vec3d translation = instance->get_offset();
         const Vec3d rotation = instance->get_rotation();
-        const Vec3d offset = instance->get_offset();
-        out_values[0] = instance->get_scaling_factor().x();
-        out_values[1] = rotation.x() * to_degrees;
-        out_values[2] = rotation.y() * to_degrees;
-        out_values[3] = rotation.z() * to_degrees;
-        out_values[4] = offset.x();
-        out_values[5] = offset.y();
-        return SP_OK;
-    });
-}
-
-sp_result sp_arrange(sp_engine *engine)
-{
-    return guard(engine, [&]() -> sp_result {
-        if (!engine->model_loaded) {
-            engine->last_error = "no model loaded";
-            return SP_ERR_STATE;
+        const Vec3d scale = instance->get_scaling_factor();
+        const Vec3d mirror = instance->get_mirror();
+        for (int axis = 0; axis < 3; ++axis) {
+            out_transform->translate[axis] = translation[axis];
+            out_transform->rotate_deg[axis] = rotation[axis] * to_degrees;
+            out_transform->scale[axis] = scale[axis];
+            out_transform->mirror[axis] = mirror[axis];
         }
-        if (!engine->config_loaded) {
-            engine->last_error = "no profile loaded, so the bed is unknown";
-            return SP_ERR_STATE;
-        }
-        // libslic3r's own arrange, invoked the way the CLI does, rather than
-        // shifting instances by hand.
-        const Points bed = get_bed_shape(engine->config);
-        arrangement::ArrangeParams params;
-        // Its default progress callback writes to stdout, which would corrupt a
-        // consumer's output. A no-op rather than nullptr: the caller invokes it
-        // unconditionally.
-        params.progressind = [](unsigned, std::string) {};
-        arrange_objects(engine->model, bed, params);
-        for (ModelObject *object : engine->model.objects)
-            if (!object->instances.empty())
-                object->ensure_on_bed();
-        engine->mesh = extract_mesh(engine->model);
         return SP_OK;
     });
 }

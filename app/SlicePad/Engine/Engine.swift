@@ -94,20 +94,49 @@ final class Engine {
     var objectCount: Int { Int(sp_object_count(handle)) }
     var repairedErrors: Int { Int(sp_model_repaired_errors(handle)) }
 
-    func setTransform(object: Int = 0, scale: Double, rotateX: Double, rotateY: Double,
-                      rotateZ: Double, translateX: Double, translateY: Double) throws {
-        try check(sp_set_transform(handle, Int32(object), scale, rotateX, rotateY,
-                                   rotateZ, translateX, translateY))
+    /// Where an object sits, in the four vectors the engine keeps: translation in bed
+    /// millimetres, rotation in degrees composed Rz·Ry·Rx, a scaling factor per axis
+    /// and a mirror per axis.
+    ///
+    /// Read before writing. Every field is absolute, so changing one means passing
+    /// the others back as they were — sending defaults for the ones a control does
+    /// not show would undo the placement and any auto-orientation with it.
+    struct Placement: Equatable {
+        var translate = SIMD3<Double>(0, 0, 0)
+        var rotateDegrees = SIMD3<Double>(0, 0, 0)
+        var scale = SIMD3<Double>(1, 1, 1)
+        var mirror = SIMD3<Double>(1, 1, 1)
+
+        init() {}
+
+        /// C fixed-size arrays arrive in Swift as tuples, which is the only reason
+        /// this conversion exists.
+        init(_ raw: sp_transform) {
+            translate = SIMD3(raw.translate.0, raw.translate.1, raw.translate.2)
+            rotateDegrees = SIMD3(raw.rotate_deg.0, raw.rotate_deg.1, raw.rotate_deg.2)
+            scale = SIMD3(raw.scale.0, raw.scale.1, raw.scale.2)
+            mirror = SIMD3(raw.mirror.0, raw.mirror.1, raw.mirror.2)
+        }
+
+        var raw: sp_transform {
+            var raw = sp_transform()
+            raw.translate = (translate.x, translate.y, translate.z)
+            raw.rotate_deg = (rotateDegrees.x, rotateDegrees.y, rotateDegrees.z)
+            raw.scale = (scale.x, scale.y, scale.z)
+            raw.mirror = (mirror.x, mirror.y, mirror.z)
+            return raw
+        }
     }
 
-    /// Scale, rotation about each axis in degrees, then translation — the same six
-    /// values `setTransform` takes. Read before writing: every argument there is
-    /// absolute, so anything the caller is not changing has to be passed back
-    /// unchanged.
-    func transform(object: Int = 0) -> [Double]? {
-        var values = [Double](repeating: 0, count: 6)
-        guard sp_object_transform(handle, Int32(object), &values) == SP_OK else { return nil }
-        return values
+    func placement(object: Int = 0) -> Placement? {
+        var raw = sp_transform()
+        guard sp_object_get_transform(handle, Int32(object), &raw) == SP_OK else { return nil }
+        return Placement(raw)
+    }
+
+    func setPlacement(_ placement: Placement, object: Int = 0) throws {
+        var raw = placement.raw
+        try check(sp_object_set_transform(handle, Int32(object), &raw))
     }
 
     func autoOrient() throws { try check(sp_auto_orient(handle)) }
