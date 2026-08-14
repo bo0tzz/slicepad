@@ -367,6 +367,7 @@ jobs:
 
       - name: Launch the app normally
         run: |
+          mkdir -p build/shots
           # With a model preloaded, so the screenshot shows the plate rather than
           # the empty state — the 3D view is the part no other check can see.
           container=$(xcrun simctl get_app_container "$SIM_UDID" me.bo0tzz.slicepad data)
@@ -378,7 +379,20 @@ jobs:
           sleep 45
           xcrun simctl spawn "$SIM_UDID" launchctl list | grep -q me.bo0tzz.slicepad \
             || { echo "the app is no longer running — it died during start-up"; exit 1; }
-          echo "app still running after 10s"
+          echo "app still running after the slice"
+          xcrun simctl io "$SIM_UDID" screenshot build/shots/whole-print.png || true
+
+      - name: Photograph a half-scrubbed print
+        run: |
+          # The layer view opened up, which is the state the rendering has to be
+          # legible in and the one a finished print does not show.
+          container=$(xcrun simctl get_app_container "$SIM_UDID" me.bo0tzz.slicepad data)
+          xcrun simctl terminate "$SIM_UDID" me.bo0tzz.slicepad || true
+          SIMCTL_CHILD_SLICEPAD_PRELOAD="$container/Documents/fixtures" \
+          SIMCTL_CHILD_SLICEPAD_PRELOAD_SLICE=1 \
+          SIMCTL_CHILD_SLICEPAD_PRELOAD_SCRUB=1 \
+            xcrun simctl launch "$SIM_UDID" me.bo0tzz.slicepad
+          sleep 45
 
       # Nothing else looks at the interface. The engine is checked to the byte and
       # the app is checked to the slice, but a blank plate or a layout collapsed
@@ -387,7 +401,7 @@ jobs:
         if: always()
         run: |
           mkdir -p build/shots
-          xcrun simctl io "$SIM_UDID" screenshot build/shots/launched.png || true
+          xcrun simctl io "$SIM_UDID" screenshot build/shots/half-scrubbed.png || true
 
       - name: Keep the screenshot
         if: always()

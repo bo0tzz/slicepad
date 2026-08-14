@@ -46,10 +46,17 @@ struct LayerScrubber: View {
                     }
             )
 
+            // Beside the knob rather than beside the bar: at the bar's midpoint it
+            // sits over the print, where it is both unreadable and answering a
+            // question about a part of the bar the knob is nowhere near.
             Text("\(top + 1)")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(.thinMaterial, in: Capsule())
+                .frame(width: 40, alignment: .leading)
+                .offset(y: barHeight / 2 - filledHeight)
         }
         .padding(.leading, 12)
     }

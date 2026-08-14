@@ -56,6 +56,20 @@ struct PlateView: UIViewRepresentable {
         fill.light?.intensity = 320
         fill.eulerAngles = SCNVector3(0.35, -0.9, 0)
 
+        // And one from overhead, fixed to the scene rather than carried by the
+        // camera. Both of the others are aimed across the view, so nothing lit an
+        // upward-facing surface — which in a layer view is the top of every layer
+        // and every bead, most of what there is to look at. They were left to
+        // ambient alone, and a flat one like the prime line came out nearly black.
+        // Down and slightly to one side, the way you would look at a print on a
+        // bench under a ceiling light.
+        let overhead = SCNNode()
+        overhead.light = SCNLight()
+        overhead.light?.type = .directional
+        overhead.light?.intensity = 500
+        overhead.eulerAngles = SCNVector3(-1.15, 0.4, 0)
+        view.scene?.rootNode.addChildNode(overhead)
+
         // Darker than the plate, so the bed reads as a surface sitting in space
         // rather than as an outline drawn on the background.
         view.backgroundColor = .systemGray5

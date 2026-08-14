@@ -129,6 +129,16 @@ struct ContentView: View {
                 try? await Task.sleep(for: .milliseconds(200))
             }
             model.slice()
+
+            // Half-scrubbed, when asked. The complaint the depth work answers is
+            // about seeing into a part that has been opened up, and a screenshot of
+            // a finished print does not show that at all.
+            guard ProcessInfo.processInfo.environment["SLICEPAD_PRELOAD_SCRUB"] != nil else { return }
+            for _ in 0 ..< 100 {
+                if model.layerCount > 1 { break }
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            model.topLayer = UInt32(model.layerCount / 2)
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.error != nil },
                                                             set: { if !$0 { model.error = nil } })) {
