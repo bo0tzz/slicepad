@@ -22,6 +22,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
+          # The tag's own message becomes the release notes, so the tag object has
+          # to come along rather than just the commit it points at.
+          fetch-depth: 0
 
       - name: Work out the version
         id: version
@@ -102,33 +105,45 @@ jobs:
             --ipa build/SlicePad.ipa \
             --repo "${{ github.repository }}"
 
+      # Notes come from the tag's own message. They used to be a fixed block
+      # repeated verbatim on every release, which by 0.0.5 claimed thirteen gates
+      # where there were sixteen and that nothing had been printed, which was no
+      # longer true — while the message written for each tag was discarded.
+      - name: Write the release notes
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+          gates=$(grep -oE 'kExpectedGates = [0-9]+' tests/gate.cpp | grep -oE '[0-9]+')
+
+          {
+            git tag -l --format='%(contents)' "$tag"
+            echo
+            echo "---"
+            echo
+            echo "Unsigned, for sideloading. Add this source to SideStore:"
+            echo
+            echo '```'
+            echo "https://raw.githubusercontent.com/${{ github.repository }}/main/sidestore.json"
+            echo '```'
+            echo
+            echo "or install \`SlicePad.ipa\` below directly. It slices with"
+            echo "OrcaSlicer $(grep -oE 'ORCA_TAG="v[^"]+"' scripts/fetch-orca.sh | grep -oE '[0-9.]+')," \
+                 "driven by a project \`.3mf\` saved from desktop Orca — the README says how."
+            echo
+            echo "$gates correctness gates compare this engine's output against G-code"
+            echo "sliced by desktop Orca; they pass on Linux, on macOS arm64 and inside"
+            echo "an iPad simulator, where the app also loads a profile, places a raw"
+            echo "mesh export and completes a slice."
+          } > release-notes.md
+          cat release-notes.md
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: SlicePad ${{ steps.version.outputs.version }}
           files: build/SlicePad.ipa
-          generate_release_notes: true
-          body: |
-            Unsigned build for sideloading. Add the source to SideStore:
-
-            ```
-            https://raw.githubusercontent.com/${{ github.repository }}/main/sidestore.json
-            ```
-
-            Or install `SlicePad.ipa` below directly.
-
-            It slices with OrcaSlicer 2.4.2, driven by a project `.3mf` exported
-            from desktop Orca — see the README for how to make one.
-
-            **What has been checked**: thirteen correctness gates compare the
-            engine's output against G-code sliced by desktop Orca, and they pass
-            on Linux, on macOS arm64, and inside an iPad simulator. The app itself
-            loads a profile, places a raw mesh export and completes a slice in
-            that simulator.
-
-            **What has not**: no part of this has run on physical hardware, and
-            nothing has been printed from its output.
+          body_path: release-notes.md
 
       # Committed rather than published from the workflow's own output, so the
       # source file in the repository is always the one SideStore is reading.
