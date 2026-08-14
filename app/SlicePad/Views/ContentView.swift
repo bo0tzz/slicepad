@@ -53,6 +53,13 @@ struct ContentView: View {
         HStack(spacing: 0) {
             ZStack(alignment: .top) {
                 plate
+                if model.display == .layers && model.layerCount > 1 {
+                    // Over the plate on the left, where the desktop keeps it.
+                    HStack {
+                        LayerScrubber(count: model.layerCount, top: $model.topLayer)
+                        Spacer()
+                    }
+                }
                 if model.modelName != nil {
                     Picker("View", selection: $model.display) {
                         ForEach(AppModel.Display.allCases) { Text($0.rawValue).tag($0) }
