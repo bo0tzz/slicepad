@@ -54,11 +54,14 @@ struct ContentView: View {
             ZStack(alignment: .top) {
                 plate
                 if model.display == .layers && model.layerCount > 1 {
-                    // Over the plate on the left, where the desktop keeps it.
+                    // Over the plate on the left, where the desktop keeps it, and
+                    // halfway down: the stack is top-aligned for the view switch,
+                    // which would otherwise hang the bar off the top edge.
                     HStack {
                         LayerScrubber(count: model.layerCount, top: $model.topLayer)
                         Spacer()
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 if model.modelName != nil {
                     Picker("View", selection: $model.display) {
