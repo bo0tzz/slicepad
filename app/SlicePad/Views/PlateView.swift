@@ -23,52 +23,41 @@ struct PlateView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
         view.scene = SCNScene()
-        // Lit explicitly rather than with autoenablesDefaultLighting, which gives
-        // one light and no ambient: a toolpath is thousands of small surfaces
-        // facing every direction, and the ones facing away from a single light
-        // render pure black. The solid model got away with it because its faces are
-        // few and large.
+        // Lit the way the desktop lights its own preview, which is where the
+        // near-solid look of a sliced print comes from. Its gouraud_light shader —
+        // the one GCodeViewer draws toolpaths with — is an ambient term and two
+        // directional lights in eye space, so they travel with the camera and no
+        // amount of turning the plate puts a part in shadow:
         //
-        // Kept dim, though. Ambient reaches into the gap between two beads exactly
-        // as strongly as it reaches the outside of the part, so a bright one erases
-        // every crevice a sliced print is made of and leaves a flat mass of colour.
+        //   INTENSITY_AMBIENT   0.3
+        //   LIGHT_TOP    toward (-0.4575, 0.4575, 0.7625), diffuse 0.8 * 0.6
+        //   LIGHT_FRONT  toward ( 0.6985, 0.1397, 0.6985), diffuse 0.3 * 0.6
+        //   specular, from the top light only, 0.125 * 0.6 at shininess 20
+        //
+        // Those add to 0.96 at most. Numbers of our own summed to twice that, which
+        // is its own kind of unreadable: everything facing the light flat white, and
+        // the difference between two beads burnt out of it.
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 220
+        ambient.light?.intensity = 300
         view.scene?.rootNode.addChildNode(ambient)
 
-        // Both directional lights are carried by the camera, so turning the plate
-        // does not swing a part into shadow — but aimed off the view axis rather
-        // than straight down the lens, which lights everything facing you equally
-        // and so shades a round bead like a flat ribbon.
-        let key = SCNNode()
-        key.light = SCNLight()
-        key.light?.type = .directional
-        key.light?.intensity = 950
-        key.eulerAngles = SCNVector3(-0.5, 0.55, 0)
+        // A directional light shines along its node's -Z, so each is turned to face
+        // the way the light travels — the opposite of the shader's direction, which
+        // points from the surface towards the light.
+        func directional(intensity: CGFloat, towards light: SIMD3<Float>) -> SCNNode {
+            let node = SCNNode()
+            node.light = SCNLight()
+            node.light?.type = .directional
+            node.light?.intensity = intensity
+            node.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 0, -1),
+                                              to: -simd_normalize(light))
+            return node
+        }
 
-        // Opposite and much dimmer, so the faces the key light misses are still
-        // shaped by a direction instead of being left to ambient.
-        let fill = SCNNode()
-        fill.light = SCNLight()
-        fill.light?.type = .directional
-        fill.light?.intensity = 320
-        fill.eulerAngles = SCNVector3(0.35, -0.9, 0)
-
-        // And one from overhead, fixed to the scene rather than carried by the
-        // camera. Both of the others are aimed across the view, so nothing lit an
-        // upward-facing surface — which in a layer view is the top of every layer
-        // and every bead, most of what there is to look at. They were left to
-        // ambient alone, and a flat one like the prime line came out nearly black.
-        // Down and slightly to one side, the way you would look at a print on a
-        // bench under a ceiling light.
-        let overhead = SCNNode()
-        overhead.light = SCNLight()
-        overhead.light?.type = .directional
-        overhead.light?.intensity = 500
-        overhead.eulerAngles = SCNVector3(-1.15, 0.4, 0)
-        view.scene?.rootNode.addChildNode(overhead)
+        let key = directional(intensity: 480, towards: SIMD3(-0.4575, 0.4575, 0.7625))
+        let fill = directional(intensity: 180, towards: SIMD3(0.6985, 0.1397, 0.6985))
 
         // Darker than the plate, so the bed reads as a surface sitting in space
         // rather than as an outline drawn on the background.
@@ -91,16 +80,6 @@ struct PlateView: UIViewRepresentable {
         view.antialiasingMode = .multisampling4X
         context.coordinator.cameraNode.addChildNode(key)
         context.coordinator.cameraNode.addChildNode(fill)
-        // Lighting alone cannot say which of two beads is the one further in: both
-        // face the same way and take the same light. Occlusion is the part of the
-        // picture that reads as depth, and the radius is in bed millimetres — a
-        // couple of extrusion widths, so it darkens the seams between beads rather
-        // than shading a whole region flat.
-        if let camera = context.coordinator.cameraNode.camera {
-            camera.screenSpaceAmbientOcclusionIntensity = 1.6
-            camera.screenSpaceAmbientOcclusionRadius = 1.5
-            camera.screenSpaceAmbientOcclusionBias = 0.02
-        }
         view.scene?.rootNode.addChildNode(context.coordinator.cameraNode)
         view.pointOfView = context.coordinator.cameraNode
         context.coordinator.view = view

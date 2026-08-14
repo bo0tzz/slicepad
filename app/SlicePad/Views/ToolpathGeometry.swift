@@ -103,15 +103,18 @@ enum ToolpathGeometry {
         geometry.materials = roles.map { role in
             let material = SCNMaterial()
             material.diffuse.contents = colour(for: role)
-            // Blinn rather than lambert for the sake of one thing: a soft highlight
-            // running along the top of each bead. Diffuse shading alone gives two
-            // beads lying side by side the same four brightnesses, so a field of
-            // them reads as one surface; the highlight is what separates them into
-            // individual strands. Broad and dim on purpose — a tight bright one
-            // makes a print look wet.
+            // Blinn rather than lambert for the sake of one thing: a highlight along
+            // the top of each bead. Diffuse shading alone gives two beads lying side
+            // by side the same four brightnesses, so a field of them reads as one
+            // surface; the highlight is what separates them into strands.
+            //
+            // Tight and dim, as the desktop has it: `pow(..., 20.0)` at 0.125 * 0.6.
+            // SceneKit multiplies the material's specular by the light's intensity,
+            // and only the top light at 0.48 is meant to produce one, so 0.16 there
+            // arrives as the 0.075 the shader adds.
             material.lightingModel = .blinn
-            material.specular.contents = UIColor(white: 0.35, alpha: 1)
-            material.shininess = 0.25
+            material.specular.contents = UIColor(white: 0.16, alpha: 1)
+            material.shininess = 20
             material.isDoubleSided = true
             return material
         }
