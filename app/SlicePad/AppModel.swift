@@ -34,6 +34,8 @@ final class AppModel: ObservableObject {
     /// is what makes scrubbing look like watching the print go down rather than
     /// like inspecting one slice in isolation.
     @Published var topLayer: UInt32 = 0
+    /// Which slice `topLayer` was last put at the top of.
+    private var scrubbedSlice: Int?
 
     /// Whether a rotation settles onto the nearest flat face when the finger lifts.
     /// While it is on the rings do not snap to 15°: the target is a face, and a
@@ -292,9 +294,16 @@ final class AppModel: ObservableObject {
         fresh.sliceGeneration = sliceGeneration
         geometry = fresh
         // A fresh slice shows the whole print; the control starts at the top and is
-        // pulled down, rather than starting at nothing.
+        // pulled down, rather than starting at nothing. Only a fresh one, though —
+        // this also runs when the view switches, and resetting there throws away
+        // wherever the scrubber had been left.
         if fresh.layerCount > 0 {
-            topLayer = UInt32(fresh.layerCount - 1)
+            if scrubbedSlice != sliceGeneration {
+                scrubbedSlice = sliceGeneration
+                topLayer = UInt32(fresh.layerCount - 1)
+            } else {
+                topLayer = min(topLayer, UInt32(fresh.layerCount - 1))
+            }
         }
     }
 
