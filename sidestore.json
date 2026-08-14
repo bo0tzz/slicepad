@@ -11,6 +11,15 @@
       "localizedDescription": "Slice 3D models on an iPad with OrcaSlicer's own engine, driven by a profile you export from desktop Orca.\n\nOpen a mesh \u2014 Shapr3D's export works directly \u2014 adjust wall count, infill and supports, slice, and send the G-code to a Klipper printer over Moonraker.\n\nUnsigned and distributed outside the App Store: OrcaSlicer is AGPL-3.0, which Apple's terms are incompatible with.",
       "versions": [
         {
+          "version": "0.0.6",
+          "date": "2026-08-14",
+          "localizedDescription": "SlicePad 0.0.6.",
+          "downloadURL": "https://github.com/bo0tzz/slicepad/releases/download/v0.0.6/SlicePad.ipa",
+          "size": 5807503,
+          "sha256": "f08731ea4e5490965ac7a83d548daf65bea4b0a37914a446a3b7664383b7cca3",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.0.5",
           "date": "2026-08-13",
           "localizedDescription": "SlicePad 0.0.5.",
