@@ -26,6 +26,30 @@ enum ToolpathGeometry {
         }
     }
 
+    /// The local frame of one segment, named as the desktop names it: forward along
+    /// the path, right across it, up out of it.
+    private struct Axes {
+        var forward: SIMD3<Float>
+        var right: SIMD3<Float>
+        var up: SIMD3<Float>
+    }
+
+    /// Same derivation as GCodeViewer's segment_local_axes. `up` comes out of the
+    /// other two rather than being the world's up, so a segment that climbs leans its
+    /// section with it instead of shearing.
+    private static func axes(from start: SIMD3<Float>, to end: SIMD3<Float>) -> Axes? {
+        let along = end - start
+        let length = simd_length(along)
+        guard length > 1e-5 else { return nil }
+        let forward = along / length
+        let across = simd_cross(forward, SIMD3<Float>(0, 0, 1))
+        // Zero for a move straight up or down, which a path does not contain: those
+        // are travels, and travels are not extrusions.
+        guard simd_length(across) > 1e-5 else { return nil }
+        let right = simd_normalize(across)
+        return Axes(forward: forward, right: right, up: simd_cross(right, forward))
+    }
+
     /// `layers` limits what is drawn, so a range control shows the print part-built.
     /// Nil draws everything.
     static func node(_ plate: PlateGeometry, layers visible: ClosedRange<UInt32>?) -> SCNNode? {
@@ -44,50 +68,107 @@ enum ToolpathGeometry {
         // this drawn in the dark; a geometry element per role with its own material
         // is the plain way to say the same thing.
         var indicesByRole: [UInt8: [Int32]] = [:]
-        vertices.reserveCapacity(segments * 8)
+        // A ring of four per corner rather than eight per segment, since neighbours
+        // in a path now share one.
+        vertices.reserveCapacity(segments * 5)
 
-        for segment in 0 ..< segments {
-            if let visible, !visible.contains(plate.layers[segment]) { continue }
+        func shows(_ segment: Int) -> Bool {
+            visible.map { $0.contains(plate.layers[segment]) } ?? true
+        }
 
-            let start = plate.toolpath[segment * 2]
-            let end = plate.toolpath[segment * 2 + 1]
-            let along = end - start
-            let length = simd_length(along)
-            guard length > 1e-5 else { continue }
+        /// Whether two segments are one path: the same kind of extrusion on the same
+        /// layer, the second starting where the first stopped.
+        func joins(_ first: Int, _ second: Int) -> Bool {
+            guard shows(second),
+                  plate.roles[first] == plate.roles[second],
+                  plate.layers[first] == plate.layers[second],
+                  simd_distance(plate.toolpath[first * 2 + 1],
+                                plate.toolpath[second * 2]) < 1e-4
+            else { return false }
+            // A doubling-back leaves the two rights cancelling, and averaging them
+            // gives a section with no width at all. Rare enough to just break the run.
+            guard let before = axes(from: plate.toolpath[first * 2],
+                                    to: plate.toolpath[first * 2 + 1]),
+                  let after = axes(from: plate.toolpath[second * 2],
+                                   to: plate.toolpath[second * 2 + 1])
+            else { return false }
+            return simd_length(before.right + after.right) > 1e-3
+        }
 
-            // The section is flat on the bed and upright in Z, so "sideways" is the
-            // path turned a quarter turn in the bed plane. A path climbing in Z —
-            // there are few — leans its section with it, which is close enough at
-            // the width of one extrusion.
-            let direction = along / length
-            var sideways = SIMD3<Float>(-direction.y, direction.x, 0)
-            let sidewaysLength = simd_length(sideways)
-            sideways = sidewaysLength > 1e-5 ? sideways / sidewaysLength : SIMD3<Float>(1, 0, 0)
-            let up = SIMD3<Float>(0, 0, 1)
+        /// One ring of four vertices about a point, with the normals pointing out of
+        /// each. The desktop's cross_section, which shades like a rounded bead for
+        /// four vertices rather than the dozens a real tube would need.
+        func ring(at point: SIMD3<Float>, right: SIMD3<Float>, up: SIMD3<Float>,
+                  width: Float, height: Float) {
+            let across = right * (width / 2)
+            let above = up * (height / 2)
+            for (offset, normal) in [(across, right), (above, up),
+                                     (-across, -right), (-above, -up)] {
+                let at = point + offset
+                vertices.append(SCNVector3(at.x, at.y, at.z))
+                normals.append(SCNVector3(normal.x, normal.y, normal.z))
+            }
+        }
 
-            let halfWidth = plate.widths[segment] / 2
-            let halfHeight = plate.heights[segment] / 2
+        var segment = 0
+        while segment < segments {
+            guard shows(segment), let first = axes(from: plate.toolpath[segment * 2],
+                                                  to: plate.toolpath[segment * 2 + 1])
+            else { segment += 1; continue }
+
+            // How far this path runs before it turns into something else.
+            var last = segment
+            while last + 1 < segments, joins(last, last + 1) { last += 1 }
+
             let base = Int32(vertices.count)
+            ring(at: plate.toolpath[segment * 2], right: first.right, up: first.up,
+                 width: plate.widths[segment], height: plate.heights[segment])
 
-            for point in [start, end] {
-                for (offset, normal) in [(sideways * halfWidth, sideways),
-                                         (up * halfHeight, up),
-                                         (-sideways * halfWidth, -sideways),
-                                         (-up * halfHeight, -up)] {
-                    let at = point + offset
-                    vertices.append(SCNVector3(at.x, at.y, at.z))
-                    normals.append(SCNVector3(normal.x, normal.y, normal.z))
+            // One shared ring per corner, turned to the average of the two segments
+            // meeting there — the desktop's corner_cross_section. Two independent
+            // ends butted together instead is what made a curve look like a pile of
+            // overlapping beads rather than one strand.
+            for corner in segment ..< last {
+                let next = corner + 1
+                guard let before = axes(from: plate.toolpath[corner * 2],
+                                        to: plate.toolpath[corner * 2 + 1]),
+                      let after = axes(from: plate.toolpath[next * 2],
+                                       to: plate.toolpath[next * 2 + 1])
+                else { continue }
+                let right = simd_normalize(before.right + after.right)
+                ring(at: plate.toolpath[corner * 2 + 1], right: right, up: before.up,
+                     width: (plate.widths[corner] + plate.widths[next]) / 2,
+                     height: (plate.heights[corner] + plate.heights[next]) / 2)
+            }
+
+            if let end = axes(from: plate.toolpath[last * 2], to: plate.toolpath[last * 2 + 1]) {
+                ring(at: plate.toolpath[last * 2 + 1], right: end.right, up: end.up,
+                     width: plate.widths[last], height: plate.heights[last])
+            }
+
+            // Four sides between each pair of rings, and a lid on each end: an open
+            // tube shows its own inside where a path stops.
+            let rings = (Int32(vertices.count) - base) / 4
+            // Accumulated for this path and appended once. Reading the role's whole
+            // array out, growing it and putting it back copies every index written so
+            // far, on every path — which is quadratic in a print of any size.
+            var indices: [Int32] = []
+            for step in 0 ..< max(rings - 1, 0) {
+                let here = base + step * 4, there = here + 4
+                for side in Int32(0) ..< 4 {
+                    let next = (side + 1) % 4
+                    indices += [here + side, there + side, there + next,
+                                here + side, there + next, here + next]
                 }
             }
-
-            // Four sides joining the two diamonds, each two triangles.
-            var indices = indicesByRole[plate.roles[segment], default: []]
-            for side in Int32(0) ..< 4 {
-                let next = (side + 1) % 4
-                indices += [base + side, base + 4 + side, base + 4 + next,
-                            base + side, base + 4 + next, base + next]
+            if rings > 0 {
+                for cap in [base, base + (rings - 1) * 4] {
+                    indices += [cap, cap + 1, cap + 2, cap, cap + 2, cap + 3]
+                }
             }
-            indicesByRole[plate.roles[segment]] = indices
+            indicesByRole[plate.roles[segment], default: []].append(contentsOf: indices)
+
+            segment = last + 1
         }
 
         guard !indicesByRole.isEmpty else { return nil }
